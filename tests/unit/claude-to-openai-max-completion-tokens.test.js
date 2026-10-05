@@ -1,24 +1,47 @@
 import { describe, expect, it } from "vitest";
 import { claudeToOpenAIRequest } from "../../open-sse/translator/request/claude-to-openai.js";
+import { usesMaxCompletionTokens } from "../../open-sse/translator/formats/maxTokens.js";
+import { DefaultExecutor } from "../../open-sse/executors/default.js";
 
 const body = { max_tokens: 1000, messages: [{ role: "user", content: "hi" }] };
 
-describe("claudeToOpenAIRequest max token field (#1745)", () => {
-  it.each(["gpt-5", "gpt-5.2-mini", "openai/gpt-5", "o1", "o3", "o4-mini", "openai/o3"])(
-    "%s uses max_completion_tokens",
-    (model) => {
-      const out = claudeToOpenAIRequest(model, body, false);
-      expect(out.max_completion_tokens).toBeGreaterThan(0);
-      expect(out.max_tokens).toBeUndefined();
-    },
-  );
+const NEW_MODELS = ["gpt-5", "gpt-5.2-mini", "gpt-6.1-sol", "openai/gpt-6.1-sol", "gpt-10", "o1", "o3", "o4-mini", "o5", "openai/o3"];
+const OLD_MODELS = ["gpt-4o", "gpt-4.1", "gpt-4-turbo", "gpt-oss-120b", "claude-sonnet-4", "pro3", "foo4", "deepseek-chat", "gemini-3-pro"];
 
-  it.each(["gpt-4o", "claude-sonnet-4", "pro3", "foo4", "deepseek-chat"])(
-    "%s keeps max_tokens",
-    (model) => {
-      const out = claudeToOpenAIRequest(model, body, false);
-      expect(out.max_tokens).toBeGreaterThan(0);
-      expect(out.max_completion_tokens).toBeUndefined();
-    },
-  );
+describe("usesMaxCompletionTokens (#1745)", () => {
+  it.each(NEW_MODELS)("%s needs max_completion_tokens", (m) => expect(usesMaxCompletionTokens(m)).toBe(true));
+  it.each(OLD_MODELS)("%s keeps max_tokens", (m) => expect(usesMaxCompletionTokens(m)).toBe(false));
+});
+
+describe("claudeToOpenAIRequest max token field", () => {
+  it.each(NEW_MODELS)("%s emits max_completion_tokens", (model) => {
+    const out = claudeToOpenAIRequest(model, body, false);
+    expect(out.max_completion_tokens).toBeGreaterThan(0);
+    expect(out.max_tokens).toBeUndefined();
+  });
+  it.each(OLD_MODELS)("%s emits max_tokens", (model) => {
+    const out = claudeToOpenAIRequest(model, body, false);
+    expect(out.max_tokens).toBeGreaterThan(0);
+    expect(out.max_completion_tokens).toBeUndefined();
+  });
+});
+
+describe("DefaultExecutor for OpenAI-format clients", () => {
+  it("renames max_tokens for gpt-6.1-sol on the openai provider", () => {
+    const ex = new DefaultExecutor("openai");
+    const out = ex.transformRequest("gpt-6.1-sol", { ...body }, false, {});
+    expect(out.max_completion_tokens).toBe(1000);
+    expect(out.max_tokens).toBeUndefined();
+  });
+  it("keeps an explicit max_completion_tokens from the client", () => {
+    const ex = new DefaultExecutor("openai");
+    const out = ex.transformRequest("gpt-6.1-sol", { ...body, max_completion_tokens: 50 }, false, {});
+    expect(out.max_completion_tokens).toBe(50);
+    expect(out.max_tokens).toBeUndefined();
+  });
+  it("leaves older models alone", () => {
+    const ex = new DefaultExecutor("openai");
+    const out = ex.transformRequest("gpt-4o", { ...body }, false, {});
+    expect(out.max_tokens).toBe(1000);
+  });
 });

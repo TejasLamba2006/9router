@@ -32,3 +32,21 @@ export function adjustMaxTokens(body, ceiling = DEFAULT_MAX_TOKENS) {
   return maxTokens;
 }
 
+
+// gpt-5 and newer (gpt-6.1-sol, gpt-10, ...) and the o-series reject max_tokens on
+// Chat Completions and want max_completion_tokens (#1745). Anchored so gpt-4o,
+// gpt-oss and ids like "pro3" never match.
+const MAX_COMPLETION_TOKENS_MODEL = /(?:^|\/)gpt-(?:[5-9]|\d{2,})|(?:^|\/)o[1-9]\d*(?:-|$)/i;
+
+export function usesMaxCompletionTokens(model) {
+  return typeof model === "string" && MAX_COMPLETION_TOKENS_MODEL.test(model);
+}
+
+// Rename in place; an explicit max_completion_tokens from the client wins.
+export function applyMaxCompletionTokens(body, model) {
+  if (!body || typeof body !== "object" || body.max_tokens === undefined) return body;
+  if (!usesMaxCompletionTokens(model)) return body;
+  if (body.max_completion_tokens === undefined) body.max_completion_tokens = body.max_tokens;
+  delete body.max_tokens;
+  return body;
+}

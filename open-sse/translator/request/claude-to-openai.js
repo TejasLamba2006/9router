@@ -1,6 +1,6 @@
 import { register } from "../index.js";
 import { FORMATS } from "../formats.js";
-import { adjustMaxTokens } from "../formats/maxTokens.js";
+import { adjustMaxTokens, usesMaxCompletionTokens } from "../formats/maxTokens.js";
 import { encodeDataUri } from "../concerns/image.js";
 import { ROLE, OPENAI_BLOCK, CLAUDE_BLOCK } from "../schema/index.js";
 import { collapseTextParts } from "../concerns/message.js";
@@ -9,10 +9,6 @@ function stripAnthropicBillingHeader(text) {
   if (typeof text !== "string") return "";
   return text.replace(/^x-anthropic-billing-header:[^\n]*(?:\r?\n)?/i, "");
 }
-
-// gpt-5 and o-series Chat Completions reject max_tokens, they want max_completion_tokens (#1745).
-// The o-series match is anchored so ids like "pro3" or "foo4" do not hit it.
-const MAX_COMPLETION_TOKENS_MODEL = /gpt-5|(?:^|\/)o[134](?:-|$)/i;
 
 // Convert Claude request to OpenAI format
 export function claudeToOpenAIRequest(model, body, stream) {
@@ -24,7 +20,7 @@ export function claudeToOpenAIRequest(model, body, stream) {
 
   // Max tokens
   if (body.max_tokens) {
-    const field = MAX_COMPLETION_TOKENS_MODEL.test(model) ? "max_completion_tokens" : "max_tokens";
+    const field = usesMaxCompletionTokens(model) ? "max_completion_tokens" : "max_tokens";
     result[field] = adjustMaxTokens(body);
   }
 
