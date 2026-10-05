@@ -63,6 +63,8 @@ const DEFAULT_SETTINGS = {
   pxpipeMinChars: 25000,
   pxpipeTimeoutMs: 15000,
   claudeClassifierCompat: "off",
+  webSearchRouteModel: "",
+  webSearchFallbackProvider: "",
   // Per-provider user header overrides applied at dispatch: { [providerId]: { headers: {..} } }
   providerOverrides: {},
 };
