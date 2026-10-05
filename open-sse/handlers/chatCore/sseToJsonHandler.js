@@ -1,4 +1,5 @@
 import { convertResponsesStreamToJson } from "../../transformer/streamToJsonConverter.js";
+import { restoreToolNames } from "../../utils/opencodeFingerprint.js";
 import { createErrorResult } from "../../utils/error.js";
 import { HTTP_STATUS } from "../../config/runtimeConfig.js";
 import { FORMATS } from "../../translator/formats.js";
@@ -184,7 +185,7 @@ export function parseSSEToOpenAIResponse(rawSSE, fallbackModel) {
 // return site below, same as nonStreamingHandler.js does on the plain JSON path.
 // Without this, a forced-streaming provider hides the search call in SSE and the
 // converted JSON reaches the client as an unanswered tool call.
-export async function handleForcedSSEToJson({ providerResponse, sourceFormat, targetFormat, provider, model, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, customToolNames, webSearchFallbackPlan, trackDone, appendLog, reqTag, log }) {
+export async function handleForcedSSEToJson({ providerResponse, sourceFormat, targetFormat, provider, model, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, customToolNames, webSearchFallbackPlan, toolNameMap, trackDone, appendLog, reqTag, log }) {
   const contentType = providerResponse.headers.get("content-type") || "";
   const isSSE = contentType.includes("text/event-stream") || (contentType === "" && isResponsesProvider(provider));
   if (!isSSE) return null; // not handled here
@@ -231,7 +232,7 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
       // Client is Responses API → return as-is
       if (sourceFormat === FORMATS.OPENAI_RESPONSES) {
         const intercepted = await applyWebSearchFallback({ translatedResponse: jsonResponse, sourceFormat, fallbackPlan: webSearchFallbackPlan, log });
-        return { success: true, response: new Response(JSON.stringify(intercepted), { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } }) };
+        return { success: true, response: new Response(JSON.stringify(restoreToolNames(intercepted, toolNameMap)), { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } }) };
       }
 
       // Build client-format response.
@@ -288,7 +289,7 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
       }
 
       const interceptedResp = await applyWebSearchFallback({ translatedResponse: finalResp, sourceFormat, fallbackPlan: webSearchFallbackPlan, log });
-      return { success: true, response: new Response(JSON.stringify(interceptedResp), { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } }) };
+      return { success: true, response: new Response(JSON.stringify(restoreToolNames(interceptedResp, toolNameMap)), { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } }) };
     } catch (err) {
       console.error("[ChatCore] Responses API SSE→JSON failed:", err);
       return createErrorResult(HTTP_STATUS.BAD_GATEWAY, "Failed to convert streaming response to JSON");
@@ -301,8 +302,16 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
     const parsed = parseSSEToOpenAIResponse(sseText, model);
     if (!parsed) return createErrorResult(HTTP_STATUS.BAD_GATEWAY, "Invalid SSE response for non-streaming request");
     if (parsed.error) {
+      // Structured error chunks may carry the real upstream status (e.g. the
+      // Qoder executor emits status 403 for billing envelopes). Preserve it so
+      // the account loop locks/falls back on the right status instead of a
+      // generic 502. Anything outside 400-599 still maps to 502.
+      const upstreamStatus = Number(parsed.error.status);
+      const status = Number.isInteger(upstreamStatus) && upstreamStatus >= 400 && upstreamStatus <= 599
+        ? upstreamStatus
+        : HTTP_STATUS.BAD_GATEWAY;
       return createErrorResult(
-        HTTP_STATUS.BAD_GATEWAY,
+        status,
         parsed.error.message || "Upstream SSE stream failed"
       );
     }
@@ -359,7 +368,7 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
       : parsed;
 
     const interceptedBody = await applyWebSearchFallback({ translatedResponse: finalBody, sourceFormat, fallbackPlan: webSearchFallbackPlan, log });
-    return { success: true, response: new Response(JSON.stringify(interceptedBody), { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } }) };
+    return { success: true, response: new Response(JSON.stringify(restoreToolNames(interceptedBody, toolNameMap)), { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } }) };
   } catch (err) {
     console.error("[ChatCore] Chat Completions SSE→JSON failed:", err);
     return createErrorResult(HTTP_STATUS.BAD_GATEWAY, "Failed to convert streaming response to JSON");

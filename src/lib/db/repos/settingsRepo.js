@@ -64,6 +64,8 @@ const DEFAULT_SETTINGS = {
   pxpipeTimeoutMs: 15000,
   webSearchRouteModel: "",
   webSearchFallbackProvider: "",
+  // Per-provider user header overrides applied at dispatch: { [providerId]: { headers: {..} } }
+  providerOverrides: {},
 };
 
 async function readRaw() {
@@ -85,6 +87,16 @@ export function mergeWithDefaults(raw) {
         merged[key] = true;
       } else {
         merged[key] = defVal;
+      }
+    }
+  }
+  if (merged.capacityAdapter && typeof merged.capacityAdapter === "object") {
+    for (const capKey of Object.keys(merged.capacityAdapter)) {
+      const entry = merged.capacityAdapter[capKey];
+      if (Array.isArray(entry?.models)) {
+        entry.models = entry.models.map((m) =>
+          m === "oc/mimo-v2.5-free" ? "oc/mimo-v2.6-flash-free" : m
+        );
       }
     }
   }
