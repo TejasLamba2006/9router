@@ -10,6 +10,10 @@ function stripAnthropicBillingHeader(text) {
   return text.replace(/^x-anthropic-billing-header:[^\n]*(?:\r?\n)?/i, "");
 }
 
+// gpt-5 and o-series Chat Completions reject max_tokens, they want max_completion_tokens (#1745).
+// The o-series match is anchored so ids like "pro3" or "foo4" do not hit it.
+const MAX_COMPLETION_TOKENS_MODEL = /gpt-5|(?:^|\/)o[134](?:-|$)/i;
+
 // Convert Claude request to OpenAI format
 export function claudeToOpenAIRequest(model, body, stream) {
   const result = {
@@ -20,7 +24,8 @@ export function claudeToOpenAIRequest(model, body, stream) {
 
   // Max tokens
   if (body.max_tokens) {
-    result.max_tokens = adjustMaxTokens(body);
+    const field = MAX_COMPLETION_TOKENS_MODEL.test(model) ? "max_completion_tokens" : "max_tokens";
+    result[field] = adjustMaxTokens(body);
   }
 
   // Temperature

@@ -17,7 +17,16 @@ import {
 
 const OPENCODE_UA = "opencode/1.18.31";
 const MAX_SESSION_LENGTH = 256;
-const MAX_TOOL_NAME_LEN = 128;
+// Zen rejects tool names over 64 chars (400 invalid_request_error).
+const MAX_TOOL_NAME_LEN = 64;
+
+// Over-long names keep a 50 char prefix plus a hash so two long names never collide.
+// Calls are matched by call_id, not name, so the rewrite does not break the tool loop.
+function clampToolName(name) {
+  if (name.length <= MAX_TOOL_NAME_LEN) return name;
+  const hash = crypto.createHash("sha256").update(name).digest("hex").slice(0, 8);
+  return `${name.slice(0, 50)}__${hash}`;
+}
 const SESSION_HEADER = "x-opencode-session";
 const SESSION_FIELD = "_opencodeSession";
 const REQ_FIELD = "_opencodeRequest";
@@ -323,7 +332,7 @@ function normalizeResponsesTools(body) {
     if (parameters.type === "object" && !parameters.properties) parameters = { ...parameters, properties: {} };
     for (const k of Object.keys(tool)) delete tool[k];
     tool.type = "function";
-    tool.name = name.slice(0, MAX_TOOL_NAME_LEN);
+    tool.name = clampToolName(name);
     if (description) tool.description = description;
     tool.parameters = parameters;
     validNames.add(tool.name);
@@ -356,7 +365,7 @@ function sanitizeResponsesItems(body) {
     delete item.reasoning_encrypted_content;
     if (item.type === "function_call") {
       if (!item.name || typeof item.name !== "string" || item.name.trim() === "") return false;
-      item.name = item.name.trim().slice(0, MAX_TOOL_NAME_LEN);
+      item.name = clampToolName(item.name.trim());
       item.call_id = clampResponsesCallId(item.call_id);
       item.arguments = coerceResponsesArguments(item.arguments);
       return true;
