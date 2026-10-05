@@ -246,6 +246,13 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     stripContinuityFields(translatedBody);
   }
 
+  // forceStream providers are read as SSE and folded back to JSON for non-stream clients.
+  // Same-format passthrough leaves the client's stream:false (or no flag) in the body, so
+  // the upstream replies with plain JSON that is then mislabelled as SSE. Ask for a stream.
+  if (providerRequiresStreaming && (targetFormat === FORMATS.OPENAI || targetFormat === FORMATS.OPENAI_RESPONSES)) {
+    translatedBody.stream = true;
+  }
+
   // Tool normalization: MCP-equivalent built-in dedup (Claude clients) + same-name
   // dedup for DeepSeek models (upstream rejects duplicate tool names on all endpoints).
   if (Array.isArray(translatedBody.tools)) {

@@ -67,6 +67,29 @@ const REFRESH_GRANTS = Object.fromEntries(
     })
 );
 
+// api.openai.com rejects more than 128 tools (400 array_above_max_length). Claude Code with
+// many MCP servers sends 200+. Keep tools the model is forced to call or already called in
+// this conversation first, then fill the rest in the client's order.
+const OPENAI_MAX_TOOLS = 128;
+
+function toolName(t) {
+  return t?.function?.name || t?.name;
+}
+
+function capOpenAITools(body) {
+  if (!Array.isArray(body.tools) || body.tools.length <= OPENAI_MAX_TOOLS) return;
+  const must = new Set();
+  const forced = body.tool_choice?.function?.name || body.tool_choice?.name;
+  if (forced) must.add(forced);
+  for (const m of body.messages || []) {
+    for (const c of m?.tool_calls || []) if (c?.function?.name) must.add(c.function.name);
+  }
+  const pinned = body.tools.filter((t) => must.has(toolName(t)));
+  const rest = body.tools.filter((t) => !must.has(toolName(t)));
+  const keep = new Set([...pinned, ...rest.slice(0, Math.max(0, OPENAI_MAX_TOOLS - pinned.length))]);
+  body.tools = body.tools.filter((t) => keep.has(t)).slice(0, OPENAI_MAX_TOOLS);
+}
+
 export class DefaultExecutor extends BaseExecutor {
   constructor(provider) {
     super(provider, PROVIDERS[provider] || PROVIDERS.openai);
@@ -81,6 +104,7 @@ export class DefaultExecutor extends BaseExecutor {
         delete transformed.client_metadata;
       }
       stripUnsupportedParams(this.provider, model, transformed);
+      if (this.provider === "openai") capOpenAITools(transformed);
       // OpenAI-format clients send max_tokens straight through; newer models reject it.
       if (this.provider === "openai" || this.provider?.startsWith?.("openai-compatible-")) {
         if (resolveOpenAICompatibleApiType(this.provider, credentials) !== "responses") applyMaxCompletionTokens(transformed, model);

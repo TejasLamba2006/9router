@@ -45,3 +45,27 @@ describe("DefaultExecutor for OpenAI-format clients", () => {
     expect(out.max_tokens).toBe(1000);
   });
 });
+
+describe("DefaultExecutor openai tool cap", () => {
+  const mk = (n) => Array.from({ length: n }, (_, i) => ({ type: "function", function: { name: `t${i}`, parameters: { type: "object", properties: {} } } }));
+  it("caps 224 tools to 128 and keeps order", () => {
+    const out = new DefaultExecutor("openai").transformRequest("gpt-4o", { messages: [], tools: mk(224) }, false, {});
+    expect(out.tools).toHaveLength(128);
+    expect(out.tools[0].function.name).toBe("t0");
+  });
+  it("keeps a forced tool_choice tool and tools already called", () => {
+    const body = {
+      messages: [{ role: "assistant", tool_calls: [{ id: "c1", type: "function", function: { name: "t200", arguments: "{}" } }] }],
+      tool_choice: { type: "function", function: { name: "t210" } },
+      tools: mk(224),
+    };
+    const names = new DefaultExecutor("openai").transformRequest("gpt-4o", body, false, {}).tools.map((t) => t.function.name);
+    expect(names).toHaveLength(128);
+    expect(names).toContain("t200");
+    expect(names).toContain("t210");
+  });
+  it("leaves 128 or fewer untouched", () => {
+    const out = new DefaultExecutor("openai").transformRequest("gpt-4o", { messages: [], tools: mk(128) }, false, {});
+    expect(out.tools).toHaveLength(128);
+  });
+});
