@@ -50,3 +50,12 @@ export function applyMaxCompletionTokens(body, model) {
   delete body.max_tokens;
   return body;
 }
+
+// gpt-5.4 and newer (5.6, 6.x, ...) refuse function tools on /v1/chat/completions ("Function tools with
+// reasoning_effort are not supported ... use /v1/responses"), and reject the only
+// effort values that would lift it. Tool requests for them must use /v1/responses.
+const RESPONSES_ONLY_TOOLS_MODEL = /(?:^|\/)gpt-(?:5[.-](?:[4-9]|\d{2,})|[6-9]|\d{2,})/i;
+
+export function needsResponsesForTools(model, body) {
+  return RESPONSES_ONLY_TOOLS_MODEL.test(model || "") && Array.isArray(body?.tools) && body.tools.length > 0;
+}

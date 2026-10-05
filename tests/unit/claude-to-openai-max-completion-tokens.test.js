@@ -69,3 +69,13 @@ describe("DefaultExecutor openai tool cap", () => {
     expect(out.tools).toHaveLength(128);
   });
 });
+
+describe("needsResponsesForTools (litellm#33221, frigate#24555)", async () => {
+  const { needsResponsesForTools } = await import("../../open-sse/translator/formats/maxTokens.js");
+  const withTools = { tools: [{ type: "function", function: { name: "f" } }] };
+  it.each(["gpt-5.4", "gpt-5.6-sol", "gpt-6.1-sol", "openai/gpt-6-luna", "gpt-10"])("%s + tools needs /responses", (m) =>
+    expect(needsResponsesForTools(m, withTools)).toBe(true));
+  it.each(["gpt-5", "gpt-5.1", "gpt-5.2-mini", "gpt-4o", "o3", "claude-sonnet-4"])("%s keeps chat", (m) =>
+    expect(needsResponsesForTools(m, withTools)).toBe(false));
+  it("no tools means no reroute", () => expect(needsResponsesForTools("gpt-6.1-sol", {})).toBe(false));
+});
