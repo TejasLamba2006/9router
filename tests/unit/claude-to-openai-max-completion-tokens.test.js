@@ -79,3 +79,16 @@ describe("needsResponsesForTools (litellm#33221, frigate#24555)", async () => {
     expect(needsResponsesForTools(m, withTools)).toBe(false));
   it("no tools means no reroute", () => expect(needsResponsesForTools("gpt-6.1-sol", {})).toBe(false));
 });
+
+describe("DefaultExecutor on a Responses transport", () => {
+  const creds = { runtimeTransport: { format: "openai-responses", baseUrl: "https://api.openai.com/v1/responses" } };
+  it("moves reasoning_effort to reasoning.effort", () => {
+    const out = new DefaultExecutor("openai").transformRequest("gpt-6.1-sol", { input: "hi", reasoning_effort: "high" }, false, creds);
+    expect(out.reasoning).toEqual({ effort: "high" });
+    expect(out.reasoning_effort).toBeUndefined();
+  });
+  it("keeps reasoning_effort on chat", () => {
+    const out = new DefaultExecutor("openai").transformRequest("gpt-5.1", { messages: [], reasoning_effort: "high" }, false, {});
+    expect(out.reasoning_effort).toBe("high");
+  });
+});

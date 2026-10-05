@@ -104,6 +104,11 @@ export class DefaultExecutor extends BaseExecutor {
         delete transformed.client_metadata;
       }
       stripUnsupportedParams(this.provider, model, transformed);
+      // Responses wire: reasoning_effort moved to reasoning.effort (400 otherwise).
+      if (credentials?.runtimeTransport?.format === "openai-responses" && typeof transformed.reasoning_effort === "string") {
+        transformed.reasoning = { ...(transformed.reasoning || {}), effort: transformed.reasoning_effort };
+        delete transformed.reasoning_effort;
+      }
       if (this.provider === "openai") capOpenAITools(transformed);
       // OpenAI-format clients send max_tokens straight through; newer models reject it.
       if (this.provider === "openai" || this.provider?.startsWith?.("openai-compatible-")) {
