@@ -92,3 +92,36 @@ describe("DefaultExecutor on a Responses transport", () => {
     expect(out.reasoning_effort).toBe("high");
   });
 });
+
+describe("DefaultExecutor asks OpenAI for streamed usage", () => {
+  const chat = { messages: [{ role: "user", content: "hi" }], stream: true };
+  it("adds stream_options.include_usage for the openai provider on chat", () => {
+    const out = new DefaultExecutor("openai").transformRequest("gpt-4o", { ...chat }, true, {});
+    expect(out.stream_options).toEqual({ include_usage: true });
+  });
+  it("adds it for openai-compatible chat nodes", () => {
+    const out = new DefaultExecutor("openai-compatible-x").transformRequest("m", { ...chat }, true, {});
+    expect(out.stream_options).toEqual({ include_usage: true });
+  });
+  it("keeps other stream_options the client set", () => {
+    const out = new DefaultExecutor("openai").transformRequest("gpt-4o", { ...chat, stream_options: { include_obfuscation: false } }, true, {});
+    expect(out.stream_options).toEqual({ include_obfuscation: false, include_usage: true });
+  });
+  it("respects an explicit include_usage:false from the client", () => {
+    const out = new DefaultExecutor("openai").transformRequest("gpt-4o", { ...chat, stream_options: { include_usage: false } }, true, {});
+    expect(out.stream_options.include_usage).toBe(false);
+  });
+  it("does not add it to non-stream requests (OpenAI rejects it there)", () => {
+    const out = new DefaultExecutor("openai").transformRequest("gpt-4o", { messages: chat.messages }, false, {});
+    expect(out.stream_options).toBeUndefined();
+  });
+  it("does not add it on the Responses wire", () => {
+    const creds = { runtimeTransport: { format: "openai-responses" } };
+    const out = new DefaultExecutor("openai").transformRequest("gpt-6.1-sol", { input: "hi", stream: true }, true, creds);
+    expect(out.stream_options).toBeUndefined();
+  });
+  it("does not touch other providers", () => {
+    const out = new DefaultExecutor("openrouter").transformRequest("m", { ...chat }, true, {});
+    expect(out.stream_options).toBeUndefined();
+  });
+});

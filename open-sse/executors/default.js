@@ -175,9 +175,18 @@ export class DefaultExecutor extends BaseExecutor {
         recordRenamedToolNames(body, renamed);
         recordRenamedToolNames(transformed, renamed);
       }
-      // OpenAI-format clients send max_tokens straight through; newer models reject it.
       if (this.provider === "openai" || this.provider?.startsWith?.("openai-compatible-")) {
-        if (resolveOpenAICompatibleApiType(this.provider, credentials) !== "responses") applyMaxCompletionTokens(transformed, model);
+        const onChatWire = credentials?.runtimeTransport?.format !== "openai-responses"
+          && resolveOpenAICompatibleApiType(this.provider, credentials) !== "responses";
+        if (onChatWire) {
+          // OpenAI-format clients send max_tokens straight through; newer models reject it.
+          applyMaxCompletionTokens(transformed, model);
+          // A chat stream carries no token counts unless asked; without this a forced-stream
+          // request folded back to JSON reports 0 tokens. Only valid with stream:true.
+          if (transformed.stream === true && transformed.stream_options?.include_usage === undefined) {
+            transformed.stream_options = { ...transformed.stream_options, include_usage: true };
+          }
+        }
       }
     }
 
