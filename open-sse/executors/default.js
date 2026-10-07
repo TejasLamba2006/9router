@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { BaseExecutor } from "./base.js";
 import { PROVIDERS, PROVIDER_OAUTH } from "../config/providers.js";
 import { ANTHROPIC_API_VERSION, OPENAI_COMPAT_BASE, ANTHROPIC_COMPAT_BASE, selectAnthropicBeta, mergeAnthropicBeta } from "../providers/shared.js";
@@ -8,6 +9,7 @@ import { proxyAwareFetch } from "../utils/proxyFetch.js";
 import { injectReasoningContent } from "../utils/reasoningContentInjector.js";
 import { stripUnsupportedParams } from "../translator/concerns/paramSupport.js";
 import { applyMaxCompletionTokens } from "../translator/formats/maxTokens.js";
+import { recordRenamedToolNames } from "../utils/opencodeFingerprint.js";
 import { extractClaudeSessionIdFromUserId } from "../utils/claudeCloaking.js";
 
 // Auth header descriptors — derived from registry transport.auth, fallback to hardcoded defaults.
@@ -90,6 +92,61 @@ function capOpenAITools(body) {
   body.tools = body.tools.filter((t) => keep.has(t)).slice(0, OPENAI_MAX_TOOLS);
 }
 
+// api.openai.com only accepts ^[a-zA-Z0-9_-]{1,64}$ for tool names (400 invalid_value
+// otherwise). MCP clients send names with dots, colons or slashes, so rewrite them and
+// remember the mapping so responses can be restored to the client's own spelling.
+const OPENAI_TOOL_NAME_OK = /^[a-zA-Z0-9_-]{1,64}$/;
+
+function openAIToolName(name, taken) {
+  let base = name.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64) || "tool";
+  if (!taken.has(base)) return base;
+  const hash = crypto.createHash("sha256").update(name).digest("hex").slice(0, 8);
+  base = `${base.slice(0, 55)}_${hash}`;
+  return base;
+}
+
+// Handles chat ({function:{name}}) and Responses ({name}) declarations, forced
+// tool_choice, assistant tool_calls and Responses function_call history items.
+function sanitizeOpenAIToolNames(body) {
+  const names = new Set();
+  const note = (n) => { if (typeof n === "string" && n && !OPENAI_TOOL_NAME_OK.test(n)) names.add(n); };
+  const declared = (t) => t?.function?.name ?? t?.name;
+  for (const t of body.tools || []) note(declared(t));
+  note(body.tool_choice?.function?.name ?? body.tool_choice?.name);
+  for (const m of body.messages || []) for (const c of m?.tool_calls || []) note(c?.function?.name);
+  for (const i of Array.isArray(body.input) ? body.input : []) if (i?.type === "function_call") note(i.name);
+  if (!names.size) return null;
+
+  const taken = new Set([...(body.tools || [])].map(declared).filter((n) => OPENAI_TOOL_NAME_OK.test(n || "")));
+  const forward = new Map();
+  for (const original of names) {
+    const sent = openAIToolName(original, taken);
+    taken.add(sent);
+    forward.set(original, sent);
+  }
+  const fix = (n) => forward.get(n) ?? n;
+
+  body.tools = (body.tools || []).map((t) => {
+    if (t?.function?.name !== undefined) return { ...t, function: { ...t.function, name: fix(t.function.name) } };
+    return t?.name !== undefined ? { ...t, name: fix(t.name) } : t;
+  });
+  if (body.tool_choice && typeof body.tool_choice === "object") {
+    const c = body.tool_choice;
+    if (c.function?.name !== undefined) body.tool_choice = { ...c, function: { ...c.function, name: fix(c.function.name) } };
+    else if (c.name !== undefined) body.tool_choice = { ...c, name: fix(c.name) };
+  }
+  if (Array.isArray(body.messages)) {
+    body.messages = body.messages.map((m) => Array.isArray(m?.tool_calls)
+      ? { ...m, tool_calls: m.tool_calls.map((c) => c?.function?.name !== undefined ? { ...c, function: { ...c.function, name: fix(c.function.name) } } : c) }
+      : m);
+  }
+  if (Array.isArray(body.input)) {
+    body.input = body.input.map((i) => i?.type === "function_call" && i.name !== undefined ? { ...i, name: fix(i.name) } : i);
+  }
+  // sent name -> client's original, so response tool names can be restored
+  return new Map([...forward].map(([original, sent]) => [sent, original]));
+}
+
 export class DefaultExecutor extends BaseExecutor {
   constructor(provider) {
     super(provider, PROVIDERS[provider] || PROVIDERS.openai);
@@ -109,7 +166,15 @@ export class DefaultExecutor extends BaseExecutor {
         transformed.reasoning = { ...(transformed.reasoning || {}), effort: transformed.reasoning_effort };
         delete transformed.reasoning_effort;
       }
-      if (this.provider === "openai") capOpenAITools(transformed);
+      // Groq enforces the same 128-tool limit as OpenAI.
+      if (this.provider === "openai" || this.provider === "groq") capOpenAITools(transformed);
+      if (this.provider === "openai" || this.provider?.startsWith?.("openai-compatible-")) {
+        const renamed = sanitizeOpenAIToolNames(transformed);
+        // chatCore reads the map off the body it handed to execute(), which may differ from a
+        // cloned `transformed` (json_schema fallback), so key both.
+        recordRenamedToolNames(body, renamed);
+        recordRenamedToolNames(transformed, renamed);
+      }
       // OpenAI-format clients send max_tokens straight through; newer models reject it.
       if (this.provider === "openai" || this.provider?.startsWith?.("openai-compatible-")) {
         if (resolveOpenAICompatibleApiType(this.provider, credentials) !== "responses") applyMaxCompletionTokens(transformed, model);
