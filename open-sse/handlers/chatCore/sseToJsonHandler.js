@@ -6,6 +6,7 @@ import { FORMATS } from "../../translator/formats.js";
 import { PROVIDERS } from "../../config/providers.js";
 import { buildRequestDetail, extractRequestConfig, saveUsageStats, formatDoneLine } from "./requestDetail.js";
 import { applyWebSearchFallback } from "./webSearchIntercept.js";
+import { openAICompletionToClaudeMessage } from "./claudeMessage.js";
 import { ROLE, RESPONSES_ITEM } from "../../translator/schema/index.js";
 
 // Responses-API providers (e.g. codex) may emit SSE without content-type + use Responses output shape
@@ -363,9 +364,13 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
     // lost on the non-streaming return path. Inlined (not imported from
     // nonStreamingHandler.js) to avoid a circular import: nonStreamingHandler
     // already imports parseSSEToOpenAIResponse from this module.
+    // A Claude client (e.g. Claude Code's /model check, which reads usage.input_tokens)
+    // likewise needs an Anthropic message, not a raw chat.completion.
     const finalBody = sourceFormat === FORMATS.OPENAI_RESPONSES
       ? chatCompletionToResponses(parsed, customToolNames)
-      : parsed;
+      : sourceFormat === FORMATS.CLAUDE
+        ? openAICompletionToClaudeMessage(parsed)
+        : parsed;
 
     const interceptedBody = await applyWebSearchFallback({ translatedResponse: finalBody, sourceFormat, fallbackPlan: webSearchFallbackPlan, log });
     return { success: true, response: new Response(JSON.stringify(restoreToolNames(interceptedBody, toolNameMap)), { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } }) };

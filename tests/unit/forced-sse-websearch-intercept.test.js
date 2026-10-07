@@ -157,3 +157,56 @@ describe("forced-SSE path runs the web-search intercept", () => {
     expect(json).not.toHaveProperty("tool_results");
   });
 });
+
+describe("forced-SSE path returns Claude shape to Claude clients", () => {
+  const TEXT_SSE = [
+    'data: {"id":"chatcmpl-1","object":"chat.completion.chunk","model":"gpt-x","choices":[{"delta":{"role":"assistant","content":"Hi there"}}]}',
+    'data: {"id":"chatcmpl-1","object":"chat.completion.chunk","choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":11,"completion_tokens":3,"total_tokens":14}}',
+    "data: [DONE]",
+    "",
+  ].join("\n\n");
+
+  it("emits a message with content blocks and usage.input_tokens (Claude Code /model check)", async () => {
+    const result = await handleForcedSSEToJson(baseCtx({
+      providerResponse: sseResponse(TEXT_SSE),
+      sourceFormat: FORMATS.CLAUDE,
+      targetFormat: FORMATS.OPENAI,
+    }));
+    const json = await result.response.json();
+    expect(json.type).toBe("message");
+    expect(json.role).toBe("assistant");
+    expect(json.content).toEqual([{ type: "text", text: "Hi there" }]);
+    expect(json.stop_reason).toBe("end_turn");
+    expect(json.usage.input_tokens).toBe(11);
+    expect(json.usage.output_tokens).toBe(3);
+    expect(json.choices).toBeUndefined();
+  });
+
+  it("emits tool_use blocks for tool calls", async () => {
+    const sse = [
+      'data: {"id":"c2","object":"chat.completion.chunk","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{\\"q\\":\\"x\\"}"}}]}}]}',
+      'data: {"id":"c2","object":"chat.completion.chunk","choices":[{"delta":{},"finish_reason":"tool_calls"}]}',
+      "data: [DONE]",
+      "",
+    ].join("\n\n");
+    const result = await handleForcedSSEToJson(baseCtx({
+      providerResponse: sseResponse(sse),
+      sourceFormat: FORMATS.CLAUDE,
+      targetFormat: FORMATS.OPENAI,
+    }));
+    const json = await result.response.json();
+    expect(json.content).toEqual([{ type: "tool_use", id: "call_1", name: "lookup", input: { q: "x" } }]);
+    expect(json.stop_reason).toBe("tool_use");
+  });
+
+  it("leaves OpenAI clients on the chat.completion shape", async () => {
+    const result = await handleForcedSSEToJson(baseCtx({
+      providerResponse: sseResponse(TEXT_SSE),
+      sourceFormat: FORMATS.OPENAI,
+      targetFormat: FORMATS.OPENAI,
+    }));
+    const json = await result.response.json();
+    expect(json.object).toBe("chat.completion");
+    expect(json.choices[0].message.content).toBe("Hi there");
+  });
+});
