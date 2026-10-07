@@ -24,6 +24,29 @@ export function normalizeResponsesInput(input) {
 }
 
 // Strict Responses upstreams reject overlong call_ids with InputValidationError (#393).
+// Some Responses upstreams (OpenCode Console) reject max_output_tokens below 16. Claude
+// Code's /model check sends max_tokens: 1, so a tiny cap must be raised, not forwarded.
+export const MIN_RESPONSES_OUTPUT_TOKENS = 16;
+
+/**
+ * Map the Chat-style output caps onto max_output_tokens, honouring the floor above.
+ * An explicit max_output_tokens wins; no cap from the client means none is added.
+ * Mutates and returns `body`.
+ */
+export function applyResponsesOutputCap(body) {
+  if (!body || typeof body !== "object") return body;
+  if (body.max_output_tokens === undefined) {
+    if (body.max_completion_tokens !== undefined) body.max_output_tokens = body.max_completion_tokens;
+    else if (body.max_tokens !== undefined) body.max_output_tokens = body.max_tokens;
+  }
+  delete body.max_tokens;
+  delete body.max_completion_tokens;
+  if (typeof body.max_output_tokens === "number" && body.max_output_tokens < MIN_RESPONSES_OUTPUT_TOKENS) {
+    body.max_output_tokens = MIN_RESPONSES_OUTPUT_TOKENS;
+  }
+  return body;
+}
+
 export const MAX_RESPONSES_CALL_ID_LEN = 64;
 
 // Fallback ids share one Date.now() when a batch of items is sanitized in a tight

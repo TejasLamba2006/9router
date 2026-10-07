@@ -13,6 +13,7 @@ import {
   clampResponsesCallId,
   coerceResponsesArguments,
   coerceResponsesOutput,
+  applyResponsesOutputCap,
 } from "../translator/formats/responsesApi.js";
 
 const OPENCODE_UA = "opencode/1.18.31";
@@ -436,12 +437,7 @@ export class OpenCodeExecutor extends BaseExecutor {
       }
       // Responses API names the output cap max_output_tokens and takes thinking
       // as reasoning:{effort,summary} — normalize the Chat fields at this boundary.
-      if (body.max_output_tokens === undefined) {
-        if (body.max_completion_tokens !== undefined) body.max_output_tokens = body.max_completion_tokens;
-        else if (body.max_tokens !== undefined) body.max_output_tokens = body.max_tokens;
-      }
-      delete body.max_tokens;
-      delete body.max_completion_tokens;
+      applyResponsesOutputCap(body);
       normalizeOpencodeReasoning(model, body);
       body.stream = true;
       body.store = false;

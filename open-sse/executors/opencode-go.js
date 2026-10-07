@@ -8,6 +8,7 @@ import {
   clampResponsesCallId,
   coerceResponsesArguments,
   coerceResponsesOutput,
+  applyResponsesOutputCap,
 } from "../translator/formats/responsesApi.js";
 
 const SESSION_HEADER = "x-opencode-session";
@@ -164,12 +165,7 @@ export class OpenCodeGoExecutor extends DefaultExecutor {
       out.input = [{ type: "message", role: "user", content: [{ type: "input_text", text: "..." }] }];
     }
     // Responses names the output cap max_output_tokens, not max_tokens.
-    if (out.max_output_tokens === undefined) {
-      if (out.max_completion_tokens !== undefined) out.max_output_tokens = out.max_completion_tokens;
-      else if (out.max_tokens !== undefined) out.max_output_tokens = out.max_tokens;
-    }
-    delete out.max_tokens;
-    delete out.max_completion_tokens;
+    applyResponsesOutputCap(out);
     if (out.reasoning_effort !== undefined && out.reasoning === undefined) {
       out.reasoning = { effort: out.reasoning_effort, summary: "auto" };
     }
