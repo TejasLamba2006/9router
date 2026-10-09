@@ -39,4 +39,16 @@ describe("OpenAI-compatible tool limit", () => {
     expect(out.tools).toHaveLength(128);
     expect(out.tools.map((tool) => tool.name)).toContain("tool_182");
   });
+
+  it("retains tools already called in Responses input history without a new forced choice", () => {
+    const out = getExecutor("openai-compatible-responses-test").transformRequest(model, {
+      input: [
+        { type: "function_call", call_id: "call_old", name: "tool_182", arguments: "{}" },
+        { type: "function_call_output", call_id: "call_old", output: "done" },
+      ],
+      tools: tools().map(({ function: fn }) => ({ type: "function", ...fn })),
+    }, false, { runtimeTransport: { format: "openai-responses" } });
+    expect(out.tools).toHaveLength(128);
+    expect(out.tools.map((tool) => tool.name)).toContain("tool_182");
+  });
 });

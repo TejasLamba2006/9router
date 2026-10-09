@@ -95,6 +95,13 @@ function capOpenAITools(body) {
   for (const m of body.messages || []) {
     for (const c of m?.tool_calls || []) if (c?.function?.name) must.add(c.function.name);
   }
+  // Responses history stores assistant calls as flat input[] items. Preserve a
+  // tool already used in the previous turn even when the follow-up no longer
+  // carries tool_choice, or the cap makes its function_call_output impossible
+  // to continue coherently.
+  for (const item of Array.isArray(body.input) ? body.input : []) {
+    if (item?.type === "function_call" && item.name) must.add(item.name);
+  }
   const pinned = body.tools.filter((t) => must.has(toolName(t)));
   const rest = body.tools.filter((t) => !must.has(toolName(t)));
   const keep = new Set([...pinned, ...rest.slice(0, Math.max(0, OPENAI_MAX_TOOLS - pinned.length))]);
