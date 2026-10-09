@@ -114,9 +114,10 @@ function createNoOpLogger() {
  * @param {string} model - Model name
  * @returns {Promise<object>} Promise that resolves to logger object with methods to log each stage
  */
-export async function createRequestLogger(sourceFormat, targetFormat, model) {
-  // Return no-op logger if logging is disabled
-  if (!LOGGING_ENABLED) {
+export async function createRequestLogger(sourceFormat, targetFormat, model, enabled = true) {
+  // Probes and disabled logging both use the no-op logger so credentials/raw
+  // headers never reach request files.
+  if (!enabled || !LOGGING_ENABLED) {
     return createNoOpLogger();
   }
   

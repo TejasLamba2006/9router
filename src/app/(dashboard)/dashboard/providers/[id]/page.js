@@ -1151,6 +1151,7 @@ export default function ProviderDetailPage() {
           onUnhideModels={async (ids) => {
             for (const id of ids) await handleEnableModel(id);
           }}
+          onVisibilityChanged={fetchDisabledModels}
         />
       );
     }

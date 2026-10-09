@@ -15,11 +15,15 @@ function getTimeString() {
  * @param {string} options.provider - Provider name
  * @param {string} options.model - Model name
  */
-export function createStreamController({ onDisconnect, onError, log, provider, model, reqTag = "" } = {}) {
+export function createStreamController({ onDisconnect, onError, log, provider, model, reqTag = "", signal } = {}) {
   const abortController = new AbortController();
   const startTime = Date.now();
   let disconnected = false;
   let abortTimeout = null;
+  const abortFromExternal = () => abortController.abort(signal?.reason);
+  if (signal?.aborted) abortFromExternal();
+  else signal?.addEventListener?.("abort", abortFromExternal, { once: true });
+  const removeExternalAbort = () => signal?.removeEventListener?.("abort", abortFromExternal);
 
   // Only abnormal terminations are logged; normal completion is covered by "📊 done".
   // isError uses errorLine (always shown, ignores LOG_LEVEL) so failures survive quiet levels.
@@ -50,6 +54,7 @@ export function createStreamController({ onDisconnect, onError, log, provider, m
         abortController.abort();
       }, 500);
 
+      removeExternalAbort();
       onDisconnect?.({ reason, duration: Date.now() - startTime });
     },
 
@@ -62,6 +67,7 @@ export function createStreamController({ onDisconnect, onError, log, provider, m
         clearTimeout(abortTimeout);
         abortTimeout = null;
       }
+      removeExternalAbort();
     },
 
     // Call on error
@@ -73,6 +79,7 @@ export function createStreamController({ onDisconnect, onError, log, provider, m
         clearTimeout(abortTimeout);
         abortTimeout = null;
       }
+      removeExternalAbort();
 
       if (error.name === "AbortError") {
         logStream("⚡", "ABORTED");
@@ -83,7 +90,10 @@ export function createStreamController({ onDisconnect, onError, log, provider, m
       onError?.(error);
     },
 
-    abort: () => abortController.abort()
+    abort: () => {
+      removeExternalAbort();
+      abortController.abort();
+    }
   };
 }
 

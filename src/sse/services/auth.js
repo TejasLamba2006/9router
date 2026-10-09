@@ -1,4 +1,4 @@
-import { getProviderConnections, validateApiKey, updateProviderConnection, getSettings, getProxyPools } from "@/lib/localDb";
+import { getProviderConnections, getProviderConnectionById, validateApiKey, updateProviderConnection, getSettings, getProxyPools } from "@/lib/localDb";
 import { resolveConnectionProxyConfig, pickProxyPoolId } from "@/lib/network/connectionProxy";
 import { formatRetryAfter, checkFallbackError, isModelLockActive, buildModelLockUpdate, getEarliestModelLockUntil } from "open-sse/services/accountFallback.js";
 import { MAX_RATE_LIMIT_COOLDOWN_MS } from "open-sse/config/errorConfig.js";
@@ -10,6 +10,35 @@ import * as log from "../utils/logger.js";
 let selectionMutex = Promise.resolve();
 
 const GITHUB_MONTHLY_USAGE_LIMIT = "you've reached your additional usage limit for your plan";
+
+function credentialsFromConnection(connection, resolvedProxy) {
+  return {
+    authType: connection.authType,
+    apiKey: connection.apiKey,
+    accessToken: connection.accessToken,
+    refreshToken: connection.refreshToken,
+    idToken: connection.idToken,
+    expiresAt: connection.expiresAt,
+    expiresIn: connection.expiresIn,
+    lastRefreshAt: connection.lastRefreshAt,
+    projectId: connection.projectId,
+    connectionName: connection.displayName || connection.name || connection.email || connection.id,
+    copilotToken: connection.providerSpecificData?.copilotToken,
+    providerSpecificData: {
+      ...(connection.providerSpecificData || {}),
+      connectionProxyEnabled: resolvedProxy.connectionProxyEnabled,
+      connectionProxyUrl: resolvedProxy.connectionProxyUrl,
+      connectionNoProxy: resolvedProxy.connectionNoProxy,
+      connectionProxyPoolId: resolvedProxy.proxyPoolId || null,
+      strictProxy: resolvedProxy.strictProxy === true,
+      vercelRelayUrl: resolvedProxy.vercelRelayUrl || "",
+    },
+    connectionId: connection.id,
+    testStatus: connection.testStatus,
+    lastError: connection.lastError,
+    _connection: connection,
+  };
+}
 
 function githubMonthlyResetMs(status, errorText, provider) {
   if (resolveProviderId(provider) !== "github" || Number(status) !== 402) return null;
@@ -25,6 +54,27 @@ function githubMonthlyResetMs(status, errorText, provider) {
  * @param {Set<string>|string|null} excludeConnectionIds - Connection ID(s) to exclude (for retry with next account)
  * @param {string|null} model - Model name for per-model rate limit filtering
  */
+export async function getProviderCredentialsById(provider, connectionId) {
+  const providerId = resolveProviderId(provider);
+  if (connectionId === "noauth" && FREE_PROVIDERS[providerId]?.noAuth) {
+    const resolvedProxy = await resolveConnectionProxyConfig({});
+    return credentialsFromConnection({
+      id: "noauth",
+      provider: providerId,
+      authType: "none",
+      name: "Public",
+      isActive: true,
+      accessToken: "public",
+      providerSpecificData: {},
+    }, resolvedProxy);
+  }
+
+  const connection = await getProviderConnectionById(connectionId);
+  if (!connection || connection.isActive === false || resolveProviderId(connection.provider) !== providerId) return null;
+  const resolvedProxy = await resolveConnectionProxyConfig(connection.providerSpecificData || {});
+  return credentialsFromConnection(connection, resolvedProxy);
+}
+
 export async function getProviderCredentials(provider, excludeConnectionIds = null, model = null, options = {}) {
   // Normalize to Set for consistent handling
   const excludeSet = excludeConnectionIds instanceof Set
@@ -200,33 +250,7 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
 
     const resolvedProxy = await resolveConnectionProxyConfig(connection.providerSpecificData || {});
 
-    return {
-      authType: connection.authType,
-      apiKey: connection.apiKey,
-      accessToken: connection.accessToken,
-      refreshToken: connection.refreshToken,
-      idToken: connection.idToken,
-      expiresAt: connection.expiresAt,
-      expiresIn: connection.expiresIn,
-      lastRefreshAt: connection.lastRefreshAt,
-      projectId: connection.projectId,
-      connectionName: connection.displayName || connection.name || connection.email || connection.id,
-      copilotToken: connection.providerSpecificData?.copilotToken,
-      providerSpecificData: {
-        ...(connection.providerSpecificData || {}),
-        connectionProxyEnabled: resolvedProxy.connectionProxyEnabled,
-        connectionProxyUrl: resolvedProxy.connectionProxyUrl,
-        connectionNoProxy: resolvedProxy.connectionNoProxy,
-        connectionProxyPoolId: resolvedProxy.proxyPoolId || null,
-        vercelRelayUrl: resolvedProxy.vercelRelayUrl || "",
-      },
-      connectionId: connection.id,
-      // Include current status for optimization check
-      testStatus: connection.testStatus,
-      lastError: connection.lastError,
-      // Pass full connection for clearAccountError to read modelLock_* keys
-      _connection: connection
-    };
+    return credentialsFromConnection(connection, resolvedProxy);
   } finally {
     if (resolveMutex) resolveMutex();
   }
