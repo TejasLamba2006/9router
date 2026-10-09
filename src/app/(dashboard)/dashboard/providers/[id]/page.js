@@ -86,6 +86,32 @@ export default function ProviderDetailPage() {
   const stopOneByOneRef = useRef(false);
   const [importingQoderModels, setImportingQoderModels] = useState(false);
   const [importingClineModels, setImportingClineModels] = useState(false);
+  const [refreshingModels, setRefreshingModels] = useState(false);
+  const [refreshMsg, setRefreshMsg] = useState("");
+
+  const handleRefreshModels = async () => {
+    if (refreshingModels) return;
+    const conn = connections.find((c) => c.isActive !== false);
+    if (!conn) return;
+    setRefreshingModels(true);
+    setRefreshMsg("");
+    try {
+      const res = await fetch("/api/providers/refresh-models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ connectionId: conn.id }),
+      });
+      const data = await res.json();
+      const r = data.results?.[0];
+      setRefreshMsg(!res.ok || r?.error ? `Failed: ${r?.error || data.error}` : `Fetched ${r?.fetched ?? 0}, added ${r?.added ?? 0}`);
+      await fetchCustomModels();
+      if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("customModelChanged"));
+    } catch (error) {
+      setRefreshMsg("Failed to refresh");
+    } finally {
+      setRefreshingModels(false);
+    }
+  };
   const { copied, copy } = useCopyToClipboard();
 
   const AG_RISK_STORAGE_KEY = "ag_risk_confirmed";
@@ -1248,6 +1274,20 @@ export default function ProviderDetailPage() {
           <span className="material-symbols-outlined text-sm">add</span>
           Add Model
         </button>
+
+        {/* Refresh this provider's models from its live /models endpoint */}
+        {connections.some((conn) => conn.isActive !== false) && (
+          <button
+            onClick={handleRefreshModels}
+            disabled={refreshingModels}
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-blue-500/40 px-3 py-2 text-xs text-blue-600 dark:text-blue-400 transition-colors hover:bg-blue-500/5 disabled:opacity-50"
+          >
+            <span className="material-symbols-outlined text-sm" style={refreshingModels ? { animation: "spin 1s linear infinite" } : undefined}>
+              {refreshingModels ? "progress_activity" : "sync"}
+            </span>
+            {refreshingModels ? translate("Refreshing...") : (refreshMsg || translate("Refresh models"))}
+          </button>
+        )}
 
         {/* Import Qoder models button — only show for qoder/qoder-cn provider */}
         {(providerId === "qoder" || providerId === "qoder-cn") && connections.some((conn) => conn.isActive !== false) && (

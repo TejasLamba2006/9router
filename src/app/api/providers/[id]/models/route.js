@@ -14,6 +14,7 @@ import { resolveCursorModels } from "open-sse/services/cursorModels.js";
 import { resolveZedModels } from "open-sse/shared/zedAuth.js";
 import { resolveClineModels, resolveClinepassModels } from "open-sse/services/clinepassModels.js";
 import codexProvider from "open-sse/providers/registry/codex.js";
+import { genericModelsConfig } from "@/lib/providerModelSync";
 
 const GEMINI_CLI_MODELS_URL = "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels";
 
@@ -613,7 +614,7 @@ export async function GET(request, { params }) {
       });
     }
 
-    const config = PROVIDER_MODELS_CONFIG[connection.provider];
+    const config = PROVIDER_MODELS_CONFIG[connection.provider] || genericModelsConfig(connection.provider);
     if (!config) {
       return NextResponse.json(
         { error: `Provider ${connection.provider} does not support models listing` },
