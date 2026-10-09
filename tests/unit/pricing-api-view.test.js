@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { buildPricingView, changePricingField } from "../../src/lib/pricingView.js";
+import { buildPricingView, changePricingField, normalizePricingRates } from "../../src/lib/pricingView.js";
 
 describe("pricing API view", () => {
+  it("keeps stored snake_case cache creation rates", () => {
+    expect(normalizePricingRates({ input: 1, output: 2, cache_creation: 3 })).toEqual({
+      input: 1,
+      output: 2,
+      cache_creation: 3,
+    });
+  });
+
   it("includes dynamic-only models with source and unknown rates", () => {
     const view = buildPricingView({
       hardcoded: { openai: { known: { input: 1, output: 2 } } },

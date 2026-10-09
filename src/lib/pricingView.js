@@ -5,7 +5,9 @@ export function normalizePricingRates(rates) {
     input: rates.input,
     output: rates.output,
     ...(Number.isFinite(rates.cached) ? { cached: rates.cached } : {}),
-    ...(Number.isFinite(rates.cacheCreation) ? { cache_creation: rates.cacheCreation } : {}),
+    ...(Number.isFinite(rates.cacheCreation ?? rates.cache_creation)
+      ? { cache_creation: rates.cacheCreation ?? rates.cache_creation }
+      : {}),
     ...(Number.isFinite(rates.reasoning) ? { reasoning: rates.reasoning } : {}),
   };
 }
