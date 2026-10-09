@@ -1,4 +1,5 @@
 import { detectFormat, getTargetFormat, resolveTransport } from "../services/provider.js";
+import { OPENAI_COMPAT_BASE } from "../providers/shared.js";
 import { translateRequest } from "../translator/index.js";
 import { applyThinking, extractThinking, stripThinkingSuffix } from "../translator/concerns/thinkingUnified.js";
 import { FORMATS } from "../translator/formats.js";
@@ -118,9 +119,16 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   let useTransport = (!modelSupportedFormats || modelSupportedFormats.includes(sourceFormat))
     ? runtimeTransport
     : modelTargetTransport;
-  // api.openai.com serves tool calls for gpt-6+ only on /v1/responses.
-  if (!useTransport && provider === "openai" && needsResponsesForTools(model, body)) {
-    useTransport = { format: FORMATS.OPENAI_RESPONSES, baseUrl: "https://api.openai.com/v1/responses" };
+  // gpt-5.4+ refuses function tools on /chat/completions when reasoning is on ("use /v1/responses").
+  // For custom OpenAI-compatible nodes the credential must stay on the operator's own host, so the
+  // /responses path is derived from the configured base URL rather than api.openai.com.
+  if (!useTransport && needsResponsesForTools(model, body)) {
+    if (provider === "openai") {
+      useTransport = { format: FORMATS.OPENAI_RESPONSES, baseUrl: "https://api.openai.com/v1/responses" };
+    } else if (provider?.startsWith?.("openai-compatible-")) {
+      const compatBase = credentials?.providerSpecificData?.baseUrl || OPENAI_COMPAT_BASE;
+      useTransport = { format: FORMATS.OPENAI_RESPONSES, baseUrl: `${compatBase.replace(/\/$/, "")}/responses` };
+    }
   }
   // A source-format-matched endpoint keeps the request lossless. Prefer it
   // over a model-level targetFormat, which is only the fallback for clients

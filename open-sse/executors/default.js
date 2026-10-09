@@ -175,8 +175,8 @@ export class DefaultExecutor extends BaseExecutor {
         transformed.reasoning = { ...(transformed.reasoning || {}), effort: transformed.reasoning_effort };
         delete transformed.reasoning_effort;
       }
-      // Groq enforces the same 128-tool limit as OpenAI.
-      if (this.provider === "openai" || this.provider === "groq") capOpenAITools(transformed);
+      // Groq and custom OpenAI-compatible endpoints enforce OpenAI's 128-tool limit too.
+      if (this.provider === "openai" || this.provider === "groq" || this.provider?.startsWith?.("openai-compatible-")) capOpenAITools(transformed);
       if (this.provider === "openai" || this.provider?.startsWith?.("openai-compatible-")) {
         const renamed = sanitizeOpenAIToolNames(transformed);
         // chatCore reads the map off the body it handed to execute(), which may differ from a
