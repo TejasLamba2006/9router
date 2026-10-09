@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getDisabledModels, disableModels, enableModels } from "@/lib/disabledModelsDb";
+import { getDisabledModels } from "@/lib/disabledModelsDb";
+import { disableCanonicalModels, enableCanonicalModels, getDisabledModelIds } from "@/sse/services/modelVisibility";
 
 export const dynamic = "force-dynamic";
 
@@ -9,7 +10,7 @@ export async function GET(request) {
     const { searchParams } = new URL(request.url);
     const providerAlias = searchParams.get("providerAlias");
     const all = await getDisabledModels();
-    if (providerAlias) return NextResponse.json({ ids: all[providerAlias] || [] });
+    if (providerAlias) return NextResponse.json({ ids: await getDisabledModelIds(providerAlias) });
     return NextResponse.json({ disabled: all });
   } catch (error) {
     console.log("Error fetching disabled models:", error);
@@ -24,9 +25,12 @@ export async function POST(request) {
     if (!providerAlias || !Array.isArray(ids)) {
       return NextResponse.json({ error: "providerAlias and ids[] required" }, { status: 400 });
     }
-    await disableModels(providerAlias, ids);
+    await disableCanonicalModels(providerAlias, ids);
     return NextResponse.json({ success: true });
   } catch (error) {
+    if (error?.message === "Invalid disabled model input") {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     console.log("Error disabling models:", error);
     return NextResponse.json({ error: "Failed to disable models" }, { status: 500 });
   }
@@ -41,9 +45,12 @@ export async function DELETE(request) {
     if (!providerAlias) {
       return NextResponse.json({ error: "providerAlias required" }, { status: 400 });
     }
-    await enableModels(providerAlias, id ? [id] : []);
+    await enableCanonicalModels(providerAlias, id ? [id] : []);
     return NextResponse.json({ success: true });
   } catch (error) {
+    if (error?.message === "Invalid disabled model input") {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     console.log("Error enabling models:", error);
     return NextResponse.json({ error: "Failed to enable models" }, { status: 500 });
   }

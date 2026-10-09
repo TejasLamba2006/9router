@@ -8,6 +8,7 @@ import {
 import { getSettings } from "@/lib/localDb";
 import { getModelInfo } from "../services/model.js";
 import { getKeyAccessContext, enforceKeyAccessResolved } from "../services/keyAccess.js";
+import { enforceModelEnabled } from "../services/modelVisibility.js";
 import { handleEmbeddingsCore } from "open-sse/handlers/embeddingsCore.js";
 import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
@@ -87,6 +88,8 @@ export async function handleEmbeddings(request) {
   // Per-key access control: checked before any credential lookup.
   const keyAccessDenied = await enforceKeyAccessResolved(await getKeyAccessContext(request), modelStr, provider, model);
   if (keyAccessDenied) return keyAccessDenied;
+  const disabledResponse = await enforceModelEnabled(provider, model);
+  if (disabledResponse) return disabledResponse;
 
   if (modelStr !== `${provider}/${model}`) {
     log.info("ROUTING", `${modelStr} → ${provider}/${model}`);

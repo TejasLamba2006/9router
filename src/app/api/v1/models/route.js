@@ -9,6 +9,7 @@ import {
 import { getProviderConnections, getCombos, getCustomModels, getModelAliases } from "@/lib/localDb";
 import { getDisabledModels } from "@/lib/disabledModelsDb";
 import { getKeyAccessContext, filterModelsListForKey } from "@/sse/services/keyAccess.js";
+import { getDisabledModelIds } from "@/sse/services/modelVisibility.js";
 import { resolveKiroModels } from "open-sse/services/kiroModels.js";
 import { resolveKimchiModels } from "open-sse/services/kimchiModels.js";
 import { resolveQoderModels, routableQoderModels } from "open-sse/services/qoderModels.js";
@@ -424,6 +425,8 @@ export async function buildModelsList(kindFilter, options = {}) {
 
       const modelId = String(customModel.id).trim();
       if (!modelId) continue;
+      const hidden = new Set(await getDisabledModelIds(providerAlias));
+      if (hidden.has(modelId)) continue;
 
       models.push({
         id: `${providerAlias}/${modelId}`,
@@ -441,6 +444,7 @@ export async function buildModelsList(kindFilter, options = {}) {
         || getProviderAlias(providerId)
         || staticAlias
       ).trim();
+      const canonicalDisabled = new Set(await getDisabledModelIds(providerId));
       const providerModels = PROVIDER_MODELS[staticAlias] || [];
       const enabledModels = conn?.providerSpecificData?.enabledModels;
       const hasExplicitEnabledModels =
@@ -560,7 +564,7 @@ export async function buildModelsList(kindFilter, options = {}) {
         // imageToText custom models stay in the LLM list (vision-capable chat models)
         const allowAsLlm = kind === "imageToText" && kindFilter.includes(LLM_KIND);
         if (!kindFilter.includes(kind) && !allowAsLlm) continue;
-        if (isDisabled(outputAlias, modelId) || isDisabled(staticAlias, modelId)) continue;
+        if (canonicalDisabled.has(modelId) || isDisabled(outputAlias, modelId) || isDisabled(staticAlias, modelId)) continue;
 
         const model = {
           id: `${outputAlias}/${modelId}`,

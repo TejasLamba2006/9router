@@ -6,11 +6,14 @@ const db = vi.hoisted(() => ({
   getCombos: vi.fn(),
   getCustomModels: vi.fn(async () => []),
   getModelAliases: vi.fn(async () => ({})),
+  getProviderNodes: vi.fn(async () => []),
 }));
 
 vi.mock("@/lib/localDb", () => db);
 vi.mock("@/lib/disabledModelsDb", () => ({
   getDisabledModels: vi.fn(async () => ({})),
+  disableModels: vi.fn(),
+  enableModels: vi.fn(),
 }));
 
 const { buildModelsList } = await import("../../src/app/api/v1/models/route.js");

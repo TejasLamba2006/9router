@@ -8,6 +8,7 @@ const fx = vi.hoisted(() => ({
     { id: "c1", name: "Main", models: ["openai/model-a", "openai/model-b"] },
   ],
   keys: {},
+  disabled: {},
 }));
 const mocks = vi.hoisted(() => ({
   getProviderCredentials: vi.fn(),
@@ -24,7 +25,7 @@ vi.mock("@/lib/localDb", () => ({
   getProviderConnectionById: async () => null,
   getCustomModels: async () => [],
 }));
-vi.mock("@/lib/disabledModelsDb", () => ({ getDisabledModels: async () => ({}) }));
+vi.mock("@/lib/disabledModelsDb", () => ({ getDisabledModels: async () => fx.disabled }));
 vi.mock("@/lib/db/repos/combosRepo.js", () => ({ getCombos: async () => fx.combos }));
 vi.mock("@/lib/db/repos/apiKeysRepo.js", () => ({ getApiKeyByKey: async (k) => fx.keys[k] || null }));
 vi.mock("@/lib/usageDb.js", () => ({ saveRequestUsage: vi.fn() }));
@@ -74,6 +75,7 @@ const post = (path, body, k, extra = {}) => new Request(`http://localhost${path}
 
 beforeEach(() => {
   vi.clearAllMocks();
+  fx.disabled = {};
   fx.keys = {
     "sk-open": { id: "o", name: "open", isActive: true, access: { restricted: false, allow: [] } },
     "sk-combo": { id: "c", name: "combo", isActive: true, access: { restricted: true, allow: ["Main"] } },
@@ -197,6 +199,52 @@ describe.each(handlers)("%s handler is wired", (_name, call, allowed, denied) =>
   it("denies everything for the empty-list key", async () => {
     expect((await call(allowed, "sk-empty")).status).toBe(403);
   });
+});
+
+describe("disabled model enforcement", () => {
+  beforeEach(() => mocks.getProviderCredentials.mockResolvedValue({ connectionId: "conn", connectionName: "mock" }));
+
+  it("returns exact 409 before credentials for a direct chat target", async () => {
+    fx.disabled = { openai: ["model-b"] };
+    const response = await chat("openai/model-b", "sk-open");
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: {
+        message: "Model 'openai/model-b' is disabled",
+        type: "model_disabled",
+        code: "model_disabled",
+      },
+    });
+    expect(mocks.getProviderCredentials).not.toHaveBeenCalled();
+  });
+
+  it("skips a disabled combo seat and serves the enabled one", async () => {
+    fx.disabled = { openai: ["model-a"] };
+    const response = await chat("Main", "sk-combo");
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain("from-model-b");
+    expect(mocks.handleChatCore.mock.calls.map(([arg]) => arg.modelInfo.model)).toEqual(["model-b"]);
+  });
+
+  it("returns exact 409 when every combo seat is disabled", async () => {
+    fx.disabled = { openai: ["model-a", "model-b"] };
+    const response = await chat("Main", "sk-combo");
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toMatchObject({ type: "model_disabled", code: "model_disabled" });
+    expect(mocks.getProviderCredentials).not.toHaveBeenCalled();
+  });
+
+  it.each(handlers.filter(([name]) => !["search", "fetch", "gemini-native-tts"].includes(name)))(
+    "blocks hidden %s targets before credential lookup",
+    async (_name, call, allowed) => {
+      const slash = allowed.indexOf("/");
+      fx.disabled = { [allowed.slice(0, slash)]: [allowed.slice(slash + 1)] };
+      const response = await call(allowed, "sk-open");
+      expect(response.status).toBe(409);
+      expect((await response.json()).error).toMatchObject({ type: "model_disabled", code: "model_disabled" });
+      expect(mocks.getProviderCredentials).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("video: a body without a readable model is denied for restricted keys", () => {

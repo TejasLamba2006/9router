@@ -1,7 +1,7 @@
 import PropTypes from "prop-types";
 import { CapacityBadges } from "@/shared/components";
 
-export default function ModelRow({ model, fullModel, alias, copied, onCopy, testStatus, isCustom, isFree, onDeleteAlias, onTest, isTesting, onDisable, caps, thinkingSuffix }) {
+export default function ModelRow({ model, fullModel, alias, copied, onCopy, testStatus, isCustom, isFree, onDeleteAlias, onTest, isTesting, onDisable, onEnable, hidden, caps, thinkingSuffix }) {
   const displayModel = thinkingSuffix ? `${fullModel}(${thinkingSuffix})` : fullModel;
   const borderColor = testStatus === "ok"
     ? "border-green-500/40"
@@ -61,7 +61,16 @@ export default function ModelRow({ model, fullModel, alias, copied, onCopy, test
               {copied === `model-${model.id}` ? "Copied!" : "Copy"}
             </span>
           </div>
-          {isCustom ? (
+          {(onDisable || onEnable) && (
+            <button
+              onClick={hidden ? onEnable : onDisable}
+              className="rounded p-0.5 text-text-muted opacity-100 transition-opacity hover:bg-sidebar hover:text-primary sm:opacity-0 sm:group-hover:opacity-100"
+              title={hidden ? "Unhide model" : "Hide model"}
+            >
+              <span className="material-symbols-outlined text-sm">{hidden ? "visibility" : "visibility_off"}</span>
+            </button>
+          )}
+          {isCustom && (
             <button
               onClick={onDeleteAlias}
               className="rounded p-0.5 text-text-muted opacity-100 transition-opacity hover:bg-red-500/10 hover:text-red-500 sm:opacity-0 sm:group-hover:opacity-100"
@@ -69,15 +78,7 @@ export default function ModelRow({ model, fullModel, alias, copied, onCopy, test
             >
               <span className="material-symbols-outlined text-sm">close</span>
             </button>
-          ) : onDisable ? (
-            <button
-              onClick={onDisable}
-              className="rounded p-0.5 text-text-muted opacity-100 transition-opacity hover:bg-red-500/10 hover:text-red-500 sm:opacity-0 sm:group-hover:opacity-100"
-              title="Disable this model"
-            >
-              <span className="material-symbols-outlined text-sm">close</span>
-            </button>
-          ) : null}
+          )}
         </div>
       </div>
     </div>
@@ -99,6 +100,8 @@ ModelRow.propTypes = {
   onTest: PropTypes.func,
   isTesting: PropTypes.bool,
   onDisable: PropTypes.func,
+  onEnable: PropTypes.func,
+  hidden: PropTypes.bool,
   caps: PropTypes.object,
   thinkingSuffix: PropTypes.string,
 };

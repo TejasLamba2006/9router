@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getModelAliases, setModelAlias, getCustomModels } from "@/models";
-import { getDisabledModels } from "@/lib/disabledModelsDb";
+import { createModelVisibilitySnapshot, isModelDisabled } from "@/sse/services/modelVisibility";
 import { AI_MODELS } from "@/shared/constants/config";
 import { getProviderAlias } from "@/shared/constants/providers";
 import { getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
@@ -9,33 +9,31 @@ import { getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
 export async function GET() {
   try {
     const modelAliases = await getModelAliases();
-    const disabled = await getDisabledModels();
+    const visibility = await createModelVisibilitySnapshot();
 
-    const models = AI_MODELS
-      .filter((m) => {
-        const alias = getProviderAlias(m.provider) || m.provider;
-        const list = disabled[alias] || disabled[m.provider] || [];
-        return !list.includes(m.model);
-      })
-      .map((m) => {
-        const fullModel = `${m.provider}/${m.model}`;
-        const providerAlias = getProviderAlias(m.provider) || m.provider;
-        const routedModel = `${providerAlias}/${m.model}`;
-        const c = getCapabilitiesForModel(m.provider, m.model);
-        return {
-          ...m,
-          fullModel,
-          routedModel,
-          alias: modelAliases[fullModel] || m.model,
-          caps: {
-            vision: c.vision,
-            search: c.search,
-            reasoning: c.reasoning,
-            contextWindow: c.contextWindow,
-            maxOutput: c.maxOutput,
-          },
-        };
-      });
+    const enabledModels = [];
+    for (const model of AI_MODELS) {
+      if (!await isModelDisabled(model.provider, model.model, visibility)) enabledModels.push(model);
+    }
+    const models = enabledModels.map((m) => {
+      const fullModel = `${m.provider}/${m.model}`;
+      const providerAlias = getProviderAlias(m.provider) || m.provider;
+      const routedModel = `${providerAlias}/${m.model}`;
+      const c = getCapabilitiesForModel(m.provider, m.model);
+      return {
+        ...m,
+        fullModel,
+        routedModel,
+        alias: modelAliases[fullModel] || m.model,
+        caps: {
+          vision: c.vision,
+          search: c.search,
+          reasoning: c.reasoning,
+          contextWindow: c.contextWindow,
+          maxOutput: c.maxOutput,
+        },
+      };
+    });
 
     // Custom models ride along; their stored caps override the name heuristic
     const seenFull = new Set(models.map((m) => m.fullModel));
@@ -45,6 +43,7 @@ export async function GET() {
     });
     for (const m of customModels) {
       const fullModel = `${m.providerAlias}/${m.id}`;
+      if (await isModelDisabled(m.providerAlias, m.id, visibility)) continue;
       const c = getCapabilitiesForModel(m.providerAlias, m.id);
       models.push({
         provider: m.providerAlias,

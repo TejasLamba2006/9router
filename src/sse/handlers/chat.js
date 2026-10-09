@@ -27,6 +27,7 @@ import { getProjectIdForConnection } from "open-sse/services/projectId.js";
 import { stripModelContextMarker } from "open-sse/utils/modelMarkers.js";
 import { hasNativeWebSearchTool, resolveWebSearchRouteOverride } from "open-sse/services/webSearchRouting.js";
 import { getKeyAccessContext, enforceKeyAccess, filterAdapterModels } from "../services/keyAccess.js";
+import { enforceModelEnabled, filterEnabledModels } from "../services/modelVisibility.js";
 
 /**
  * Handle chat completion request
@@ -94,6 +95,11 @@ export async function handleChat(request, clientRawRequest = null) {
   const keyAccess = await getKeyAccessContext(request);
   const keyAccessDenied = await enforceKeyAccess(keyAccess, modelStr);
   if (keyAccessDenied) return keyAccessDenied;
+  const requestedModelInfo = await getModelInfo(modelStr);
+  if (requestedModelInfo.provider) {
+    const disabledResponse = await enforceModelEnabled(requestedModelInfo.provider, requestedModelInfo.model);
+    if (disabledResponse) return disabledResponse;
+  }
 
   // Native web_search redirect (layer 2): when the request carries a native web-search
   // tool, an operator-configured webSearchRouteModel takes over the whole request so a
@@ -101,6 +107,11 @@ export async function handleChat(request, clientRawRequest = null) {
   if (hasNativeWebSearchTool(body)) {
     const route = resolveWebSearchRouteOverride(modelStr, body, settings);
     if (route.wasRouted) {
+      const routedInfo = await getModelInfo(route.model);
+      if (routedInfo.provider) {
+        const disabledResponse = await enforceModelEnabled(routedInfo.provider, routedInfo.model);
+        if (disabledResponse) return disabledResponse;
+      }
       log.info("WEBSEARCH", `Routed web_search request from ${modelStr} to ${route.model}`);
       modelStr = route.model;
       body.model = route.model;
@@ -117,18 +128,23 @@ export async function handleChat(request, clientRawRequest = null) {
   // Check if model is a combo (has multiple models with fallback)
   const comboModels = await getComboModels(modelStr);
   if (comboModels) {
+    const visibleCombo = await filterEnabledModels(comboModels, { comboName: modelStr, resolveCombo: getComboModels });
+    if (visibleCombo.response) return visibleCombo.response;
+    const enabledComboModels = visibleCombo.models;
     // Check for combo-specific strategy first, fallback to global
     const comboStrategies = settings.comboStrategies || {};
     const comboSpecificStrategy = comboStrategies[modelStr]?.fallbackStrategy;
     const comboStrategy = comboSpecificStrategy || settings.comboStrategy || "fallback";
-    const augmentedModels = await filterAdapterModels(keyAccess, augmentModelsWithCapacityAdapter(comboModels, requiredCapabilities, settings), comboModels);
-    const adapterAdded = augmentedModels.filter((m) => !comboModels.includes(m));
+    const augmentedModels = await filterAdapterModels(keyAccess, augmentModelsWithCapacityAdapter(enabledComboModels, requiredCapabilities, settings), enabledComboModels);
+    const visibleAugmented = await filterEnabledModels(augmentedModels, { comboName: modelStr });
+    if (visibleAugmented.response) return visibleAugmented.response;
+    const adapterAdded = visibleAugmented.models.filter((m) => !enabledComboModels.includes(m));
 
     if (comboStrategy === "fusion") {
-      log.info("CHAT", `Combo "${modelStr}" with ${comboModels.length} models (strategy: fusion)`);
+      log.info("CHAT", `Combo "${modelStr}" with ${visibleAugmented.models.length} models (strategy: fusion)`);
       return handleFusionChat({
         body,
-        models: comboModels,
+        models: visibleAugmented.models,
         handleSingleModel: (b, m, isPanel) => {
           let cleanRawReq = clientRawRequest;
           if (isPanel && clientRawRequest) {
@@ -139,16 +155,18 @@ export async function handleChat(request, clientRawRequest = null) {
         },
         log,
         comboName: modelStr,
-        judgeModel: comboStrategies[modelStr]?.judgeModel,
+        judgeModel: visibleAugmented.models.includes(comboStrategies[modelStr]?.judgeModel)
+          ? comboStrategies[modelStr]?.judgeModel
+          : null,
         tuning: comboStrategies[modelStr]?.fusionTuning,
       });
     }
 
     const comboStickyLimit = settings.comboStickyRoundRobinLimit;
-    log.info("CHAT", `Combo "${modelStr}" with ${augmentedModels.length} models (strategy: ${comboStrategy}, sticky: ${comboStickyLimit})`);
+    log.info("CHAT", `Combo "${modelStr}" with ${visibleAugmented.models.length} models (strategy: ${comboStrategy}, sticky: ${comboStickyLimit})`);
     return handleComboChat({
       body,
-      models: augmentedModels,
+      models: visibleAugmented.models,
       handleSingleModel: withCapacityAdapterStripping(
         (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey),
         adapterAdded
@@ -163,12 +181,14 @@ export async function handleChat(request, clientRawRequest = null) {
   // Single model request — may still switch to a capacity-adapter model if the
   // target lacks a capability the request needs (e.g. no vision, request has an image).
   const soloAugmented = await filterAdapterModels(keyAccess, augmentModelsWithCapacityAdapter([modelStr], requiredCapabilities, settings), [modelStr]);
-  if (soloAugmented.length > 1) {
-    const adapterAdded = soloAugmented.filter((m) => m !== modelStr);
-    log.info("CHAT", `Capacity adapter for [${[...requiredCapabilities].join(",")}] on "${modelStr}" → trying ${soloAugmented.join(", ")}`);
+  const visibleSolo = await filterEnabledModels(soloAugmented, { comboName: modelStr });
+  if (visibleSolo.response) return visibleSolo.response;
+  if (visibleSolo.models.length > 1) {
+    const adapterAdded = visibleSolo.models.filter((m) => m !== modelStr);
+    log.info("CHAT", `Capacity adapter for [${[...requiredCapabilities].join(",")}] on "${modelStr}" → trying ${visibleSolo.models.join(", ")}`);
     return handleComboChat({
       body,
-      models: soloAugmented,
+      models: visibleSolo.models,
       handleSingleModel: withCapacityAdapterStripping(
         (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey),
         adapterAdded
@@ -192,6 +212,9 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
   if (!modelInfo.provider) {
     const comboModels = await getComboModels(modelStr);
     if (comboModels) {
+      const visibleCombo = await filterEnabledModels(comboModels, { comboName: modelStr, resolveCombo: getComboModels });
+      if (visibleCombo.response) return visibleCombo.response;
+      const enabledComboModels = visibleCombo.models;
       const chatSettings = await getSettings();
       // Check for combo-specific strategy first, fallback to global
       const comboStrategies = chatSettings.comboStrategies || {};
@@ -201,14 +224,16 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       // Nested combo (a combo member that is itself a combo): the access decision
       // was made on the outer target; only drop adapter models the key may not call.
       const keyAccess = await getKeyAccessContext(request);
-      const augmentedModels = await filterAdapterModels(keyAccess, augmentModelsWithCapacityAdapter(comboModels, requiredCapabilities, chatSettings), comboModels);
-      const adapterAdded = augmentedModels.filter((m) => !comboModels.includes(m));
+      const augmentedModels = await filterAdapterModels(keyAccess, augmentModelsWithCapacityAdapter(enabledComboModels, requiredCapabilities, chatSettings), enabledComboModels);
+      const visibleAugmented = await filterEnabledModels(augmentedModels, { comboName: modelStr });
+      if (visibleAugmented.response) return visibleAugmented.response;
+      const adapterAdded = visibleAugmented.models.filter((m) => !enabledComboModels.includes(m));
 
       if (comboStrategy === "fusion") {
-        log.info("CHAT", `Combo "${modelStr}" with ${comboModels.length} models (strategy: fusion)`);
+        log.info("CHAT", `Combo "${modelStr}" with ${visibleAugmented.models.length} models (strategy: fusion)`);
         return handleFusionChat({
           body,
-          models: comboModels,
+          models: visibleAugmented.models,
           handleSingleModel: (b, m, isPanel) => {
             let cleanRawReq = clientRawRequest;
             if (isPanel && clientRawRequest) {
@@ -219,16 +244,18 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
           },
           log,
           comboName: modelStr,
-          judgeModel: comboStrategies[modelStr]?.judgeModel,
+          judgeModel: visibleAugmented.models.includes(comboStrategies[modelStr]?.judgeModel)
+          ? comboStrategies[modelStr]?.judgeModel
+          : null,
           tuning: comboStrategies[modelStr]?.fusionTuning,
         });
       }
 
       const comboStickyLimit = chatSettings.comboStickyRoundRobinLimit;
-      log.info("CHAT", `Combo "${modelStr}" with ${augmentedModels.length} models (strategy: ${comboStrategy}, sticky: ${comboStickyLimit})`);
+      log.info("CHAT", `Combo "${modelStr}" with ${visibleAugmented.models.length} models (strategy: ${comboStrategy}, sticky: ${comboStickyLimit})`);
       return handleComboChat({
         body,
-        models: augmentedModels,
+        models: visibleAugmented.models,
         handleSingleModel: withCapacityAdapterStripping(
           (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey),
           adapterAdded
@@ -244,6 +271,8 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
   }
 
   const { provider, model } = modelInfo;
+  const disabledResponse = await enforceModelEnabled(provider, model);
+  if (disabledResponse) return disabledResponse;
 
   // Routing shown in the unified "▶" line (client model → provider/model)
 

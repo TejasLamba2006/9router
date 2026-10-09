@@ -4,7 +4,9 @@ import { useState } from "react";
 import PropTypes from "prop-types";
 import { Button } from "@/shared/components";
 import { getProviderCustomModelRows } from "@/shared/utils/providerCustomModels";
-function CompatibleModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias, onTest, testStatus, isTesting }) {
+import { filterModelRows } from "@/shared/utils/modelVisibility";
+import ModelVisibilityToolbar from "./ModelVisibilityToolbar";
+function CompatibleModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias, onTest, testStatus, isTesting, hidden, onHide, onUnhide }) {
   const borderColor = testStatus === "ok"
     ? "border-green-500/40"
     : testStatus === "error"
@@ -61,6 +63,13 @@ function CompatibleModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias,
         </div>
       </div>
       <button
+        onClick={hidden ? onUnhide : onHide}
+        className="p-1 hover:bg-sidebar rounded text-text-muted hover:text-primary"
+        title={hidden ? "Unhide model" : "Hide model"}
+      >
+        <span className="material-symbols-outlined text-sm">{hidden ? "visibility" : "visibility_off"}</span>
+      </button>
+      <button
         onClick={onDeleteAlias}
         className="p-1 hover:bg-red-50 rounded text-red-500"
         title="Remove model"
@@ -71,11 +80,27 @@ function CompatibleModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias,
   );
 }
 
-export default function CompatibleModelsSection({ providerStorageAlias, providerDisplayAlias, modelAliases, customModels, copied, onCopy, onDeleteAlias, onAddCustomModel, onDeleteCustomModel, connections, isAnthropic, onImportModels, importing, importMessage }) {
+CompatibleModelRow.propTypes = {
+  modelId: PropTypes.string.isRequired,
+  fullModel: PropTypes.string.isRequired,
+  copied: PropTypes.string,
+  onCopy: PropTypes.func.isRequired,
+  onDeleteAlias: PropTypes.func.isRequired,
+  onTest: PropTypes.func,
+  testStatus: PropTypes.oneOf(["ok", "error"]),
+  isTesting: PropTypes.bool,
+  hidden: PropTypes.bool,
+  onHide: PropTypes.func.isRequired,
+  onUnhide: PropTypes.func.isRequired,
+};
+
+export default function CompatibleModelsSection({ providerStorageAlias, providerDisplayAlias, modelAliases, customModels, copied, onCopy, onDeleteAlias, onAddCustomModel, onDeleteCustomModel, connections, isAnthropic, onImportModels, importing, importMessage, disabledModelIds, onHideModels, onUnhideModels }) {
   const [newModel, setNewModel] = useState("");
   const [adding, setAdding] = useState(false);
   const [testingModelId, setTestingModelId] = useState(null);
   const [modelTestResults, setModelTestResults] = useState({});
+  const [query, setQuery] = useState("");
+  const [visibility, setVisibility] = useState("all");
 
   const handleTestModel = async (modelId) => {
     if (testingModelId) return;
@@ -101,6 +126,15 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
     providerAlias: providerStorageAlias,
     type: "llm",
   });
+
+  const disabledSet = new Set(disabledModelIds);
+  const shownModels = filterModelRows(allModels, { query, visibility, disabledIds: disabledModelIds });
+  const counts = {
+    all: allModels.length,
+    visible: allModels.filter((model) => !disabledSet.has(model.id)).length,
+    hidden: allModels.filter((model) => disabledSet.has(model.id)).length,
+    disabledSet,
+  };
 
   const handleAdd = async () => {
     if (!newModel.trim() || adding) return;
@@ -157,21 +191,39 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
       )}
 
       {allModels.length > 0 && (
-        <div className="flex flex-col gap-3">
-          {allModels.map(({ id, alias, source }) => (
-            <CompatibleModelRow
-              key={`${source}-${providerStorageAlias}/${id}`}
-              modelId={id}
-              fullModel={`${providerDisplayAlias}/${id}`}
-              copied={copied}
-              onCopy={onCopy}
-              onDeleteAlias={() => source === "custom" ? onDeleteCustomModel(id) : onDeleteAlias(alias)}
-              onTest={connections.length > 0 ? () => handleTestModel(id) : undefined}
-              testStatus={modelTestResults[id]}
-              isTesting={testingModelId === id}
-            />
-          ))}
-        </div>
+        <>
+          <ModelVisibilityToolbar
+            query={query}
+            onQueryChange={setQuery}
+            visibility={visibility}
+            onVisibilityChange={setVisibility}
+            counts={counts}
+            shownIds={shownModels.map((model) => model.id)}
+            onHideShown={onHideModels}
+            onUnhideShown={onUnhideModels}
+          />
+          <div className="flex flex-col gap-3">
+            {shownModels.map(({ id, alias, source }) => {
+              const hidden = disabledSet.has(id);
+              return (
+                <CompatibleModelRow
+                  key={`${source}-${providerStorageAlias}/${id}`}
+                  modelId={id}
+                  fullModel={`${providerDisplayAlias}/${id}`}
+                  copied={copied}
+                  onCopy={onCopy}
+                  onDeleteAlias={() => source === "custom" ? onDeleteCustomModel(id) : onDeleteAlias(alias)}
+                  onTest={!hidden && connections.length > 0 ? () => handleTestModel(id) : undefined}
+                  testStatus={modelTestResults[id]}
+                  isTesting={testingModelId === id}
+                  hidden={hidden}
+                  onHide={() => onHideModels([id])}
+                  onUnhide={() => onUnhideModels([id])}
+                />
+              );
+            })}
+          </div>
+        </>
       )}
     </div>
   );
@@ -195,4 +247,7 @@ CompatibleModelsSection.propTypes = {
   onImportModels: PropTypes.func.isRequired,
   importing: PropTypes.bool,
   importMessage: PropTypes.string,
+  disabledModelIds: PropTypes.arrayOf(PropTypes.string).isRequired,
+  onHideModels: PropTypes.func.isRequired,
+  onUnhideModels: PropTypes.func.isRequired,
 };

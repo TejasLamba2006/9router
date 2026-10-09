@@ -14,6 +14,8 @@ import { useModelCaps } from "@/shared/hooks/useModelCaps";
 import { translate } from "@/i18n/runtime";
 import { fetchSuggestedModels } from "@/shared/utils/providerModelsFetcher";
 import { getProviderCustomModelRows } from "@/shared/utils/providerCustomModels";
+import { filterModelRows } from "@/shared/utils/modelVisibility";
+import ModelVisibilityToolbar from "./ModelVisibilityToolbar";
 import ModelRow from "./ModelRow";
 import PassthroughModelsSection from "./PassthroughModelsSection";
 import CompatibleModelsSection from "./CompatibleModelsSection";
@@ -76,6 +78,8 @@ export default function ProviderDetailPage() {
   const [liveModelsError, setLiveModelsError] = useState(null);
   const [kiloFreeModels, setKiloFreeModels] = useState([]);
   const [disabledModelIds, setDisabledModelIds] = useState([]);
+  const [modelQuery, setModelQuery] = useState("");
+  const [modelVisibility, setModelVisibility] = useState("all");
   const [confirmState, setConfirmState] = useState(null);
   const [showAgRiskModal, setShowAgRiskModal] = useState(false);
   const [oneByOneRunning, setOneByOneRunning] = useState(false);
@@ -1142,6 +1146,11 @@ export default function ProviderDetailPage() {
           onImportModels={handleRefreshModels}
           importing={refreshingModels}
           importMessage={refreshMsg}
+          disabledModelIds={disabledModelIds}
+          onHideModels={handleDisableAll}
+          onUnhideModels={async (ids) => {
+            for (const id of ids) await handleEnableModel(id);
+          }}
         />
       );
     }
@@ -1152,8 +1161,6 @@ export default function ProviderDetailPage() {
       ...kiloFreeModels.filter((fm) => !models.some((m) => m.id === fm.id)),
     ].filter((m) => { const k = getModelKind(m); return !k || k === "llm"; });
     const disabledSet = new Set(disabledModelIds);
-    const displayModels = allModels.filter((m) => !disabledSet.has(m.id));
-    const disabledDisplayModels = allModels.filter((m) => disabledSet.has(m.id));
     const customModelRows = getProviderCustomModelRows({
       customModels,
       modelAliases,
@@ -1161,37 +1168,62 @@ export default function ProviderDetailPage() {
       builtInModels: models,
       type: "llm",
     });
+    const rows = [
+      ...customModelRows.map((model) => ({ ...model, name: model.name || model.id })),
+      ...allModels.map((model) => ({ ...model, fullModel: `${providerDisplayAlias}/${model.id}` })),
+    ];
+    const shownRows = filterModelRows(rows, { query: modelQuery, visibility: modelVisibility, disabledIds: disabledModelIds });
+    const counts = {
+      all: rows.length,
+      visible: rows.filter((model) => !disabledSet.has(model.id)).length,
+      hidden: rows.filter((model) => disabledSet.has(model.id)).length,
+      disabledSet,
+    };
 
     return (
       <div className="flex flex-wrap gap-3">
-        {/* Custom models first */}
-        {customModelRows.map((model) => (
-          <ModelRow
-            key={`${model.source}-${model.fullModel}`}
-            model={{ id: model.id, name: model.name }}
-            fullModel={`${providerDisplayAlias}/${model.id}`}
-            alias={model.alias}
-            copied={copied}
-            onCopy={copy}
-            onSetAlias={() => {}}
-            onDeleteAlias={() => {
-              if (model.source === "custom") {
-                handleDeleteCustomModel(model.id, "llm", providerStorageAlias);
-              } else {
-                handleDeleteAlias(model.alias);
-              }
-            }}
-            testStatus={modelTestResults[model.id]}
-            onTest={connections.length > 0 || isFreeNoAuth ? () => handleTestModel(model.id) : undefined}
-            isTesting={testingModelIds.has(model.id)}
-            isCustom
-            isFree={false}
-            caps={getCaps(`${providerId}/${model.id}`)}
-            thinkingSuffix={resolveThinkingSuffix(model.id)}
-          />
-        ))}
+        <ModelVisibilityToolbar
+          query={modelQuery}
+          onQueryChange={setModelQuery}
+          visibility={modelVisibility}
+          onVisibilityChange={setModelVisibility}
+          counts={counts}
+          shownIds={shownRows.map((model) => model.id)}
+          onHideShown={handleDisableAll}
+          onUnhideShown={async (ids) => {
+            for (const id of ids) await handleEnableModel(id);
+          }}
+        />
 
-        {displayModels.map((model) => {
+        {shownRows.map((model) => {
+          if (model.source) {
+            const hidden = disabledSet.has(model.id);
+            return (
+              <ModelRow
+                key={`${model.source}-${model.fullModel}`}
+                model={{ id: model.id, name: model.name }}
+                fullModel={`${providerDisplayAlias}/${model.id}`}
+                alias={model.alias}
+                copied={copied}
+                onCopy={copy}
+                onDeleteAlias={() => {
+                  if (model.source === "custom") handleDeleteCustomModel(model.id, "llm", providerStorageAlias);
+                  else handleDeleteAlias(model.alias);
+                }}
+                testStatus={modelTestResults[model.id]}
+                onTest={!hidden && (connections.length > 0 || isFreeNoAuth) ? () => handleTestModel(model.id) : undefined}
+                isTesting={testingModelIds.has(model.id)}
+                isCustom
+                isFree={false}
+                onDisable={() => handleDisableModel(model.id)}
+                onEnable={() => handleEnableModel(model.id)}
+                hidden={hidden}
+                caps={getCaps(`${providerId}/${model.id}`)}
+                thinkingSuffix={resolveThinkingSuffix(model.id)}
+              />
+            );
+          }
+          const hidden = disabledSet.has(model.id);
           const fullModel = `${providerStorageAlias}/${model.id}`;
           const oldFormatModel = `${providerId}/${model.id}`;
           const existingAlias = Object.entries(modelAliases).find(
@@ -1208,10 +1240,12 @@ export default function ProviderDetailPage() {
               onSetAlias={(alias) => handleSetAlias(model.id, alias, providerStorageAlias)}
               onDeleteAlias={() => handleDeleteAlias(existingAlias)}
               testStatus={modelTestResults[model.id]}
-              onTest={connections.length > 0 || isFreeNoAuth ? () => handleTestModel(model.id) : undefined}
+              onTest={!hidden && (connections.length > 0 || isFreeNoAuth) ? () => handleTestModel(model.id) : undefined}
               isTesting={testingModelIds.has(model.id)}
               isFree={model.isFree}
               onDisable={() => handleDisableModel(model.id)}
+              onEnable={() => handleEnableModel(model.id)}
+              hidden={hidden}
               caps={getCaps(`${providerId}/${model.id}`)}
               thinkingSuffix={resolveThinkingSuffix(model.id)}
             />
@@ -1301,26 +1335,6 @@ export default function ProviderDetailPage() {
             </div>
           );
         })()}
-
-        {/* Disabled models — restorable */}
-        {disabledDisplayModels.length > 0 && (
-          <div className="w-full mt-2">
-            <p className="text-xs text-text-muted mb-2">Disabled models ({disabledDisplayModels.length}):</p>
-            <div className="flex flex-wrap gap-2">
-              {disabledDisplayModels.map((m) => (
-                <button
-                  key={m.id}
-                  onClick={() => handleEnableModel(m.id)}
-                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-dashed border-black/10 dark:border-white/10 text-xs text-text-muted hover:text-primary hover:border-primary/40 hover:bg-primary/5 transition-colors"
-                  title="Restore model"
-                >
-                  <span className="material-symbols-outlined text-[13px]">add</span>
-                  {m.id}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
     );
   };

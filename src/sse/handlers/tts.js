@@ -5,6 +5,7 @@ import {
 import { getSettings } from "@/lib/localDb";
 import { getModelInfo, getComboModels } from "../services/model.js";
 import { getKeyAccessContext, enforceKeyAccess } from "../services/keyAccess.js";
+import { enforceModelEnabled, filterEnabledModels } from "../services/modelVisibility.js";
 import { handleTtsCore } from "open-sse/handlers/ttsCore.js";
 import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
@@ -52,13 +53,15 @@ export async function handleTts(request) {
   // Combo expansion: model may be a combo name → run fallback/round-robin across models
   const comboModels = await getComboModels(modelStr);
   if (comboModels) {
+    const visibleCombo = await filterEnabledModels(comboModels, { comboName: modelStr });
+    if (visibleCombo.response) return visibleCombo.response;
     const comboStrategies = settings.comboStrategies || {};
     const comboStrategy = comboStrategies[modelStr]?.fallbackStrategy || settings.comboStrategy || "fallback";
     const comboStickyLimit = settings.comboStickyRoundRobinLimit;
-    log.info("TTS", `Combo "${modelStr}" with ${comboModels.length} models (strategy: ${comboStrategy}, sticky: ${comboStickyLimit})`);
+    log.info("TTS", `Combo "${modelStr}" with ${visibleCombo.models.length} models (strategy: ${comboStrategy}, sticky: ${comboStickyLimit})`);
     return handleComboChat({
       body,
-      models: comboModels,
+      models: visibleCombo.models,
       handleSingleModel: (b, m) => handleSingleModelTts(b, m, responseFormat, language, style),
       log,
       comboName: modelStr,
@@ -75,6 +78,8 @@ async function handleSingleModelTts(body, modelStr, responseFormat, language, st
   if (!modelInfo.provider) return errorResponse(HTTP_STATUS.BAD_REQUEST, "Invalid model format");
 
   const { provider, model } = modelInfo;
+  const disabledResponse = await enforceModelEnabled(provider, model);
+  if (disabledResponse) return disabledResponse;
   log.info("ROUTING", `Provider: ${provider}, Voice: ${model}`);
 
   // noAuth providers — no credential needed
