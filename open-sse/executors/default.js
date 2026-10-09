@@ -9,7 +9,7 @@ import { buildClineHeaders } from "../shared/clineAuth.js";
 import { proxyAwareFetch } from "../utils/proxyFetch.js";
 import { injectReasoningContent } from "../utils/reasoningContentInjector.js";
 import { stripUnsupportedParams } from "../translator/concerns/paramSupport.js";
-import { applyMaxCompletionTokens } from "../translator/formats/maxTokens.js";
+import { applyMaxCompletionTokens, applyMinMaxCompletionTokens } from "../translator/formats/maxTokens.js";
 import { recordRenamedToolNames } from "../utils/opencodeFingerprint.js";
 import { extractClaudeSessionIdFromUserId } from "../utils/claudeCloaking.js";
 
@@ -197,6 +197,7 @@ export class DefaultExecutor extends BaseExecutor {
         if (onChatWire) {
           // OpenAI-format clients send max_tokens straight through; newer models reject it.
           applyMaxCompletionTokens(transformed, model);
+          applyMinMaxCompletionTokens(transformed, model);
           // A chat stream carries no token counts unless asked; without this a forced-stream
           // request folded back to JSON reports 0 tokens. Only valid with stream:true.
           if (transformed.stream === true && transformed.stream_options?.include_usage === undefined) {

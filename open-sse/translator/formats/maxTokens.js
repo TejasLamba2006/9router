@@ -51,6 +51,19 @@ export function applyMaxCompletionTokens(body, model) {
   return body;
 }
 
+// Claude Code's /model validation sends max_tokens:1. GPT-5+ chat endpoints can
+// spend that token before producing visible output and return a 400 asking for
+// a higher cap; live probing confirms 16 is accepted while 1 is rejected.
+export const MIN_MAX_COMPLETION_TOKENS = 16;
+
+export function applyMinMaxCompletionTokens(body, model) {
+  if (!body || typeof body !== "object" || !usesMaxCompletionTokens(model)) return body;
+  if (typeof body.max_completion_tokens === "number" && body.max_completion_tokens < MIN_MAX_COMPLETION_TOKENS) {
+    body.max_completion_tokens = MIN_MAX_COMPLETION_TOKENS;
+  }
+  return body;
+}
+
 // gpt-5.4 and newer (5.6, 6.x, ...) refuse function tools on /v1/chat/completions ("Function tools with
 // reasoning_effort are not supported ... use /v1/responses"), and reject the only
 // effort values that would lift it. Tool requests for them must use /v1/responses.

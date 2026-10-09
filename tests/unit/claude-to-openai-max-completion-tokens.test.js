@@ -93,6 +93,54 @@ describe("DefaultExecutor on a Responses transport", () => {
   });
 });
 
+describe("DefaultExecutor floors tiny GPT output caps for Claude Code /model validation", () => {
+  it.each([0, 1, 15])("raises compatible gpt-5.6 max_completion_tokens %i to 16", (n) => {
+    const out = new DefaultExecutor("openai-compatible-chat-test").transformRequest(
+      "gpt-5.6-sol",
+      { messages: [{ role: "user", content: "hi" }], max_completion_tokens: n },
+      false,
+      { providerSpecificData: { apiType: "chat" } },
+    );
+    expect(out.max_completion_tokens).toBe(16);
+  });
+
+  it.each([16, 17, 1024])("keeps compatible gpt-5.6 max_completion_tokens %i", (n) => {
+    const out = new DefaultExecutor("openai-compatible-chat-test").transformRequest(
+      "gpt-5.6-sol",
+      { messages: [], max_completion_tokens: n },
+      false,
+      { providerSpecificData: { apiType: "chat" } },
+    );
+    expect(out.max_completion_tokens).toBe(n);
+  });
+
+  it("floors an OpenAI-format max_tokens:1 after converting it to max_completion_tokens", () => {
+    const out = new DefaultExecutor("openai-compatible-chat-test").transformRequest(
+      "gpt-5.6-sol", { messages: [], max_tokens: 1 }, false,
+      { providerSpecificData: { apiType: "chat" } },
+    );
+    expect(out.max_tokens).toBeUndefined();
+    expect(out.max_completion_tokens).toBe(16);
+  });
+
+  it("does not change pre-GPT-5 models", () => {
+    const out = new DefaultExecutor("openai-compatible-chat-test").transformRequest(
+      "gpt-4o", { messages: [], max_tokens: 1 }, false,
+      { providerSpecificData: { apiType: "chat" } },
+    );
+    expect(out.max_tokens).toBe(1);
+    expect(out.max_completion_tokens).toBeUndefined();
+  });
+
+  it("does not add a cap when the client sent none", () => {
+    const out = new DefaultExecutor("openai-compatible-chat-test").transformRequest(
+      "gpt-5.6-sol", { messages: [] }, false,
+      { providerSpecificData: { apiType: "chat" } },
+    );
+    expect(out.max_completion_tokens).toBeUndefined();
+  });
+});
+
 describe("DefaultExecutor asks OpenAI for streamed usage", () => {
   const chat = { messages: [{ role: "user", content: "hi" }], stream: true };
   it("adds stream_options.include_usage for the openai provider on chat", () => {
