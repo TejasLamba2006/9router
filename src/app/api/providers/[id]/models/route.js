@@ -10,6 +10,7 @@ import { resolveKimchiModels } from "open-sse/services/kimchiModels.js";
 import { resolveQoderModels } from "open-sse/services/qoderModels.js";
 import { resolveGrokCliModels } from "open-sse/services/grokCliModels.js";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
+import { proxyAwareFetch } from "open-sse/utils/proxyFetch.js";
 import { resolveCursorModels } from "open-sse/services/cursorModels.js";
 import { resolveZedModels } from "open-sse/shared/zedAuth.js";
 import { resolveClineModels, resolveClinepassModels } from "open-sse/services/clinepassModels.js";
@@ -539,6 +540,10 @@ export async function GET(request, { params }) {
     if (!connection) {
       return NextResponse.json({ error: "Connection not found" }, { status: 404 });
     }
+    const proxyOptions = await resolveConnectionProxyConfig(connection.providerSpecificData || {});
+    const timeoutSignal = AbortSignal.timeout(60_000);
+    const upstreamSignal = request.signal ? AbortSignal.any([request.signal, timeoutSignal]) : timeoutSignal;
+    const fetchUpstream = (url, options = {}) => proxyAwareFetch(url, { ...options, signal: upstreamSignal }, proxyOptions);
 
     if (isOpenAICompatibleProvider(connection.provider)) {
       const baseUrl = connection.providerSpecificData?.baseUrl;
@@ -546,7 +551,7 @@ export async function GET(request, { params }) {
         return NextResponse.json({ error: "No base URL configured for OpenAI compatible provider" }, { status: 400 });
       }
       const url = `${baseUrl.replace(/\/$/, "")}/models`;
-      const response = await fetch(url, {
+      const response = await fetchUpstream(url, {
         method: "GET",
         headers: {
           "Content-Type": "application/json",
@@ -585,7 +590,7 @@ export async function GET(request, { params }) {
       }
 
       const url = `${baseUrl}/models`;
-      const response = await fetch(url, {
+      const response = await fetchUpstream(url, {
         method: "GET",
         headers: {
           "Content-Type": "application/json",
@@ -664,7 +669,7 @@ export async function GET(request, { params }) {
       fetchOptions.body = JSON.stringify(config.body);
     }
 
-    const response = await fetch(url, fetchOptions);
+    const response = await fetchUpstream(url, fetchOptions);
 
     if (!response.ok) {
       const errorText = await response.text();

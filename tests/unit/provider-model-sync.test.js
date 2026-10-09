@@ -42,37 +42,57 @@ describe("normalizeModelList", () => {
     ]);
     expect(out.map((m) => m.id)).toEqual(["chat-1"]);
   });
+
+  it("strips the current provider alias from qualified ids", () => {
+    const out = normalizeModelList([{ id: "qoder/auto" }, { id: "qd/plus" }, { id: "other/vendor-model" }], ["qoder", "qd"]);
+    expect(out.map((m) => m.id)).toEqual(["auto", "plus", "other/vendor-model"]);
+  });
 });
 
 describe("syncConnectionModels", () => {
   const conn = { id: "c1", provider: "groq" };
   const deps = (over = {}) => ({
-    fetchModels: vi.fn(async () => [{ id: "new-1" }, { id: "built-in" }, { id: "have-it" }]),
+    fetchModels: vi.fn(async () => [{ id: "new-1", owned_by: "vendor" }, { id: "built-in" }, { id: "have-it" }]),
     alias: "groq",
     builtinIds: new Set(["built-in"]),
-    existingIds: new Set(["have-it"]),
-    addModel: vi.fn(async () => true),
+    upsertModels: vi.fn(async ({ models }) => ({ fetched: models.length, added: models.length, updated: 0, unchanged: 0, invalid: 0, stale: 0 })),
     ...over,
   });
 
-  it("adds only models that are neither built in nor already stored", async () => {
+  it("persists all non-built-in models with one batch call", async () => {
     const d = deps();
     const res = await syncConnectionModels(conn, d);
-    expect(d.addModel).toHaveBeenCalledTimes(1);
-    expect(d.addModel).toHaveBeenCalledWith({ providerAlias: "groq", id: "new-1", type: "llm", name: "new-1" });
-    expect(res).toMatchObject({ provider: "groq", fetched: 3, added: 1 });
+    expect(d.upsertModels).toHaveBeenCalledTimes(1);
+    expect(d.upsertModels).toHaveBeenCalledWith(expect.objectContaining({
+      providerAlias: "groq",
+      connectionId: "c1",
+      models: [
+        { id: "new-1", name: "new-1", reported: { owned_by: "vendor" } },
+        { id: "have-it", name: "have-it", reported: {} },
+      ],
+      authoritative: true,
+    }));
+    expect(res).toMatchObject({ provider: "groq", fetched: 3, added: 2 });
   });
 
-  it("never removes anything when the fetch fails", async () => {
+  it("never writes when the fetch fails", async () => {
     const d = deps({ fetchModels: vi.fn(async () => { throw new Error("401"); }) });
     const res = await syncConnectionModels(conn, d);
-    expect(d.addModel).not.toHaveBeenCalled();
+    expect(d.upsertModels).not.toHaveBeenCalled();
     expect(res).toMatchObject({ provider: "groq", added: 0, error: "401" });
+  });
+
+  it("uses an authoritative empty custom subset when a non-empty catalog contains only built-ins", async () => {
+    const d = deps({ fetchModels: vi.fn(async () => [{ id: "built-in" }]) });
+    const res = await syncConnectionModels(conn, d);
+    expect(d.upsertModels).toHaveBeenCalledWith(expect.objectContaining({ models: [], authoritative: true }));
+    expect(res).toMatchObject({ fetched: 1 });
   });
 
   it("treats an empty list as a no-op, not an error", async () => {
     const d = deps({ fetchModels: vi.fn(async () => []) });
     const res = await syncConnectionModels(conn, d);
+    expect(d.upsertModels).not.toHaveBeenCalled();
     expect(res).toMatchObject({ fetched: 0, added: 0 });
     expect(res.error).toBeUndefined();
   });

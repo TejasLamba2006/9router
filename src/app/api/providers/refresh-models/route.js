@@ -6,7 +6,10 @@ import { refreshProviderModels } from "@/lib/providerModelRefresh";
 export async function POST(request) {
   try {
     const { connectionId } = await request.json().catch(() => ({}));
-    const results = await refreshProviderModels({ connectionId });
+    if (connectionId !== undefined && (typeof connectionId !== "string" || !connectionId.trim() || connectionId.length > 128)) {
+      return NextResponse.json({ error: "Invalid connectionId" }, { status: 400 });
+    }
+    const results = await refreshProviderModels({ connectionId: connectionId?.trim(), signal: request.signal });
     const added = results.reduce((n, r) => n + r.added, 0);
     return NextResponse.json({ success: true, added, results });
   } catch (error) {

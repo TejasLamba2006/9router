@@ -2,46 +2,52 @@
 // each provider for its live model list through the existing per-connection
 // route (so every provider-specific fetcher is reused) and stores the new ones.
 
-import { getProviderConnections, getCustomModels, addCustomModel } from "@/lib/localDb";
+import { getProviderConnections, upsertCustomModels } from "@/lib/localDb";
 import { getProviderAlias, isOpenAICompatibleProvider, isAnthropicCompatibleProvider } from "@/shared/constants/providers";
 import { getModelsByProviderId } from "open-sse/config/providerModels.js";
 import { syncConnectionModels } from "@/lib/providerModelSync";
 
 let running = null;
+const runningByConnection = new Map();
 
-async function fetchViaRoute(conn) {
+async function fetchViaRoute(conn, signal) {
   const { GET } = await import("@/app/api/providers/[id]/models/route.js");
-  const res = await GET(new Request("http://localhost/internal"), { params: Promise.resolve({ id: conn.id }) });
+  const res = await GET(new Request("http://localhost/internal", { signal }), { params: Promise.resolve({ id: conn.id }) });
   const body = await res.json();
   if (!res.ok) throw new Error(body?.error || `HTTP ${res.status}`);
   return body.models;
 }
 
 // Refresh one connection, or every active one (one per provider) when none is given.
-export async function refreshProviderModels({ connectionId } = {}) {
+export async function refreshProviderModels({ connectionId, signal } = {}) {
   if (running && !connectionId) return running;
+  if (connectionId && runningByConnection.has(connectionId)) return runningByConnection.get(connectionId);
   const job = (async () => {
     const all = await getProviderConnections({ isActive: true });
     const conns = connectionId
       ? all.filter((c) => c.id === connectionId)
       : [...new Map(all.map((c) => [c.provider, c])).values()];
-    const custom = await getCustomModels();
     const results = [];
     for (const conn of conns) {
       const compat = isOpenAICompatibleProvider(conn.provider) || isAnthropicCompatibleProvider(conn.provider);
       const alias = compat ? conn.provider : getProviderAlias(conn.provider);
       results.push(await syncConnectionModels(conn, {
-        fetchModels: fetchViaRoute,
+        fetchModels: (connection) => fetchViaRoute(connection, signal),
         alias,
         builtinIds: new Set(getModelsByProviderId(conn.provider).map((m) => m.id)),
-        existingIds: new Set(custom.filter((m) => m.providerAlias === alias).map((m) => m.id)),
-        addModel: addCustomModel,
+        upsertModels: upsertCustomModels,
+        signal,
       }));
     }
     return results;
   })();
-  if (!connectionId) running = job.finally(() => { running = null; });
-  return job;
+  if (!connectionId) {
+    running = job.finally(() => { running = null; });
+    return running;
+  }
+  const tracked = job.finally(() => { runningByConnection.delete(connectionId); });
+  runningByConnection.set(connectionId, tracked);
+  return tracked;
 }
 
 // Daily background refresh, same shape as the catalog sync timer. MODEL_REFRESH=off disables it.

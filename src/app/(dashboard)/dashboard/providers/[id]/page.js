@@ -88,6 +88,7 @@ export default function ProviderDetailPage() {
   const [importingClineModels, setImportingClineModels] = useState(false);
   const [refreshingModels, setRefreshingModels] = useState(false);
   const [refreshMsg, setRefreshMsg] = useState("");
+  const refreshAbortRef = useRef(null);
 
   const handleRefreshModels = async () => {
     if (refreshingModels) return;
@@ -95,23 +96,33 @@ export default function ProviderDetailPage() {
     if (!conn) return;
     setRefreshingModels(true);
     setRefreshMsg("");
+    const controller = new AbortController();
+    refreshAbortRef.current = controller;
     try {
       const res = await fetch("/api/providers/refresh-models", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ connectionId: conn.id }),
+        signal: controller.signal,
       });
       const data = await res.json();
       const r = data.results?.[0];
-      setRefreshMsg(!res.ok || r?.error ? `Failed: ${r?.error || data.error}` : `Fetched ${r?.fetched ?? 0}, added ${r?.added ?? 0}`);
+      if (!res.ok || r?.error) {
+        setRefreshMsg(`Failed: ${r?.error || data.error}`);
+        return;
+      }
+      setRefreshMsg(`Fetched ${r?.fetched ?? 0} · Added ${r?.added ?? 0} · Updated ${r?.updated ?? 0} · Stale ${r?.stale ?? 0}`);
       await fetchCustomModels();
       if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("customModelChanged"));
     } catch (error) {
-      setRefreshMsg("Failed to refresh");
+      if (error?.name !== "AbortError") setRefreshMsg("Failed to refresh");
     } finally {
+      if (refreshAbortRef.current === controller) refreshAbortRef.current = null;
       setRefreshingModels(false);
     }
   };
+
+  useEffect(() => () => refreshAbortRef.current?.abort(), []);
   const { copied, copy } = useCopyToClipboard();
 
   const AG_RISK_STORAGE_KEY = "ag_risk_confirmed";
@@ -613,106 +624,44 @@ export default function ProviderDetailPage() {
     }
   };
 
-  // Fetch Qoder model list and automatically add to available models
-  const handleImportQoderModels = async () => {
-    if (importingQoderModels) return;
+  // Native providers and compatible nodes use the same server-side import:
+  // one upstream fetch + one DB transaction + one UI reload.
+  const importModelsForActiveConnection = async (setImporting, providerLabel) => {
     const activeConnection = connections.find((conn) => conn.isActive !== false);
     if (!activeConnection) {
-      alert(translate("Please add an active Qoder connection first"));
+      alert(translate(`Please add an active ${providerLabel} connection first`));
       return;
     }
-
-    setImportingQoderModels(true);
+    setImporting(true);
     try {
-      const res = await fetch(`/api/providers/${activeConnection.id}/models`);
+      const res = await fetch("/api/providers/refresh-models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ connectionId: activeConnection.id }),
+      });
       const data = await res.json();
-      if (!res.ok) {
-        alert(data.error || translate("Failed to fetch models"));
+      const result = data.results?.[0];
+      if (!res.ok || result?.error) {
+        alert(result?.error || data.error || translate("Failed to fetch models"));
         return;
       }
-      const models = data.models || [];
-      if (models.length === 0) {
-        alert(translate("No models returned"));
-        return;
-      }
-
-      let importedCount = 0;
-      for (const model of models) {
-        const modelId = model.id || model.name;
-        if (!modelId) continue;
-        
-        // Qoder model ID format may be "qoder/auto", "qoder-cn/auto" or "auto",
-        // need to remove the provider prefix before storing.
-        const cleanModelId = modelId.replace(/^(qoder-cn|qoder)\//, "");
-        const alreadyExists = customModels.some(
-          (entry) => entry.providerAlias === providerStorageAlias && entry.id === cleanModelId && (entry.kind || entry.type || "llm") === "llm"
-        ) || Object.values(modelAliases).includes(`${providerStorageAlias}/${cleanModelId}`);
-        if (alreadyExists) {
-          continue;
-        }
-
-        await handleAddCustomModel(cleanModelId, "llm", providerStorageAlias);
-        importedCount += 1;
-      }
-      
-      if (importedCount === 0) {
-        alert(translate("All models already exist, no new models added"));
-      } else {
-        alert(translate("Successfully added") + ` ${importedCount} ` + translate("models"));
-      }
+      await fetchCustomModels();
+      if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("customModelChanged"));
+      alert(`Fetched ${result?.fetched ?? 0} · Added ${result?.added ?? 0} · Updated ${result?.updated ?? 0} · Stale ${result?.stale ?? 0}`);
     } catch (error) {
-      console.log("Error importing Qoder models:", error);
+      console.log(`Error importing ${providerLabel} models:`, error);
       alert(translate("Error fetching models") + ": " + error.message);
     } finally {
-      setImportingQoderModels(false);
+      setImporting(false);
     }
   };
-  // Fetch the live Cline /models catalog and add every model not yet present.
-  // Cline and ClinePass share the same catalog endpoint (api.cline.bot/api/v1/models).
+
+  const handleImportQoderModels = async () => {
+    if (!importingQoderModels) await importModelsForActiveConnection(setImportingQoderModels, "Qoder");
+  };
+
   const handleImportClineModels = async () => {
-    if (importingClineModels) return;
-    const activeConnection = connections.find((conn) => conn.isActive !== false);
-    if (!activeConnection) {
-      alert(translate("Please add an active Cline connection first"));
-      return;
-    }
-    setImportingClineModels(true);
-    try {
-      const res = await fetch(`/api/providers/${activeConnection.id}/models`);
-      const data = await res.json();
-      if (!res.ok) {
-        alert(data.error || translate("Failed to fetch models"));
-        return;
-      }
-      const models = data.models || [];
-      if (models.length === 0) {
-        alert(translate("No models returned"));
-        return;
-      }
-      let importedCount = 0;
-      for (const model of models) {
-        const modelId = model.id || model.name;
-        if (!modelId) continue;
-        const alreadyExists = customModels.some(
-          (entry) => entry.providerAlias === providerStorageAlias && entry.id === modelId && (entry.kind || entry.type || "llm") === "llm"
-        ) || Object.values(modelAliases).includes(`${providerStorageAlias}/${modelId}`);
-        if (alreadyExists) {
-          continue;
-        }
-        await handleAddCustomModel(modelId, "llm", providerStorageAlias);
-        importedCount += 1;
-      }
-      if (importedCount === 0) {
-        alert(translate("All models already exist, no new models added"));
-      } else {
-        alert(translate("Successfully added") + ` ${importedCount} ` + translate("models"));
-      }
-    } catch (error) {
-      console.log("Error importing Cline models:", error);
-      alert(translate("Error fetching models") + ": " + error.message);
-    } finally {
-      setImportingClineModels(false);
-    }
+    if (!importingClineModels) await importModelsForActiveConnection(setImportingClineModels, "Cline");
   };
 
   const handleRunOneByOneTest = async () => {
@@ -1190,6 +1139,9 @@ export default function ProviderDetailPage() {
           onDeleteCustomModel={(modelId) => handleDeleteCustomModel(modelId, "llm", providerStorageAlias)}
           connections={connections}
           isAnthropic={isAnthropicCompatible}
+          onImportModels={handleRefreshModels}
+          importing={refreshingModels}
+          importMessage={refreshMsg}
         />
       );
     }
