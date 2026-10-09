@@ -1206,6 +1206,7 @@ export default function ProviderDetailPage() {
                 selected={modelBatch.selectedIds.includes(model.id)}
                 onToggleSelected={!hidden && supportsStrictModelTests ? () => modelBatch.toggleSelected(model.id) : undefined}
                 batchResult={modelBatch.results[model.id]}
+                capabilityEvidence={modelBatch.capabilityEvidence[model.id]}
                 caps={getCaps(`${providerId}/${model.id}`)}
                 thinkingSuffix={resolveThinkingSuffix(model.id)}
               />
@@ -1237,6 +1238,7 @@ export default function ProviderDetailPage() {
               selected={modelBatch.selectedIds.includes(model.id)}
               onToggleSelected={!hidden && supportsStrictModelTests ? () => modelBatch.toggleSelected(model.id) : undefined}
               batchResult={modelBatch.results[model.id]}
+              capabilityEvidence={modelBatch.capabilityEvidence[model.id]}
               caps={getCaps(`${providerId}/${model.id}`)}
               thinkingSuffix={resolveThinkingSuffix(model.id)}
             />

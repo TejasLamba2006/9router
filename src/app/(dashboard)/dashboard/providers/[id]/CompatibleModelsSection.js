@@ -6,9 +6,10 @@ import { Button } from "@/shared/components";
 import { getProviderCustomModelRows } from "@/shared/utils/providerCustomModels";
 import { filterModelRows } from "@/shared/utils/modelVisibility";
 import ModelVisibilityToolbar from "./ModelVisibilityToolbar";
+import ModelCapabilityBadges from "@/shared/components/ModelCapabilityBadges";
 import ModelBatchToolbar from "./ModelBatchToolbar";
 import useModelBatchTest from "./useModelBatchTest";
-function CompatibleModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias, onTest, testStatus, isTesting, hidden, onHide, onUnhide, selected, onToggleSelected, batchResult }) {
+function CompatibleModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias, onTest, testStatus, isTesting, hidden, onHide, onUnhide, selected, onToggleSelected, batchResult, capabilityEvidence }) {
   const borderColor = testStatus === "ok"
     ? "border-green-500/40"
     : testStatus === "error"
@@ -46,6 +47,7 @@ function CompatibleModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias,
               {batchResult.classification}
             </span>
           )}
+          <ModelCapabilityBadges capabilities={capabilityEvidence} />
         </div>
         <div className="flex items-center gap-1 mt-1">
           <code className="text-xs text-text-muted font-mono bg-sidebar px-1.5 py-0.5 rounded">{fullModel}</code>
@@ -116,6 +118,7 @@ CompatibleModelRow.propTypes = {
     ok: PropTypes.bool,
     classification: PropTypes.string,
   }),
+  capabilityEvidence: PropTypes.object,
 };
 
 export default function CompatibleModelsSection({ providerStorageAlias, providerDisplayAlias, modelAliases, customModels, copied, onCopy, onDeleteAlias, onAddCustomModel, onDeleteCustomModel, connections, isAnthropic, onImportModels, importing, importMessage, disabledModelIds, onHideModels, onUnhideModels, onVisibilityChanged }) {
@@ -229,6 +232,7 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
                   selected={batch.selectedIds.includes(id)}
                   onToggleSelected={() => batch.toggleSelected(id)}
                   batchResult={batch.results[id]}
+                  capabilityEvidence={batch.capabilityEvidence[id]}
                 />
               );
             })}

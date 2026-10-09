@@ -4,10 +4,11 @@ const fx = vi.hoisted(() => ({
   connection: { id: "conn-a", provider: "openai", isActive: true },
   hidden: [],
 }));
-const mocks = vi.hoisted(() => ({ probe: vi.fn(), disable: vi.fn() }));
+const mocks = vi.hoisted(() => ({ probe: vi.fn(), disable: vi.fn(), capabilityGroup: vi.fn(), persist: vi.fn() }));
 
 vi.mock("@/lib/localDb", () => ({
   getProviderConnectionById: async () => fx.connection,
+  upsertModelCapabilityEvidence: mocks.persist,
   getCustomModels: async () => [
     { providerAlias: "openai", id: "a", type: "llm" },
     { providerAlias: "openai", id: "b", type: "llm" },
@@ -17,6 +18,7 @@ vi.mock("@/lib/localDb", () => ({
 }));
 vi.mock("@/shared/constants/models", () => ({ getModelsByProviderId: () => [] }));
 vi.mock("@/lib/modelProbe", () => ({ runModelProbe: mocks.probe }));
+vi.mock("@/lib/modelCapabilityProbe", () => ({ runModelCapabilityProbeGroup: mocks.capabilityGroup }));
 vi.mock("@/sse/services/modelVisibility", () => ({
   getDisabledModelIds: async () => fx.hidden,
   disableCanonicalModels: mocks.disable,
@@ -44,6 +46,9 @@ beforeEach(() => {
   fx.connection = { id: "conn-a", provider: "openai", isActive: true };
   fx.hidden = [];
   mocks.probe.mockImplementation(async ({ model }) => ({ modelId: model, classification: "healthy", ok: true, status: 200, latencyMs: 1, retryAfterMs: 0, message: "" }));
+  mocks.capabilityGroup.mockResolvedValue({
+    text: { provider: "openai", model: "a", connectionId: "conn-a", capability: "text", outcome: "verified", checkedAt: "now", evidence: {}, probeVersion: 1 },
+  });
 });
 
 describe("model test batch route", () => {
@@ -80,6 +85,22 @@ describe("model test batch route", () => {
     });
     expect((await POST(request)).status).toBe(403);
     expect(mocks.probe).not.toHaveBeenCalled();
+  });
+
+  it("runs and persists capability probes on the selected connection", async () => {
+    const { events } = await run({ providerId: "openai", connectionId: "conn-a", modelIds: ["a"], cooldownMs: 0, verifyCapabilities: true });
+    expect(mocks.capabilityGroup).toHaveBeenCalledWith(expect.objectContaining({
+      provider: "openai", model: "a", connectionId: "conn-a",
+    }));
+    expect(mocks.persist).toHaveBeenCalledWith([expect.objectContaining({ capability: "text", connectionId: "conn-a" })]);
+    expect(events.find((event) => event.type === "result")?.result.capabilities.text.outcome).toBe("verified");
+  });
+
+  it("does not run capability probes when basic health fails", async () => {
+    mocks.probe.mockResolvedValue({ modelId: "a", classification: "rate_limited", ok: false, status: 429, latencyMs: 1, retryAfterMs: 0, message: "limited" });
+    await run({ providerId: "openai", connectionId: "conn-a", modelIds: ["a"], cooldownMs: 0, verifyCapabilities: true });
+    expect(mocks.capabilityGroup).not.toHaveBeenCalled();
+    expect(mocks.persist).not.toHaveBeenCalled();
   });
 
   it("auto-hides only hard model failures", async () => {

@@ -1,7 +1,8 @@
 import PropTypes from "prop-types";
 import { CapacityBadges } from "@/shared/components";
+import ModelCapabilityBadges from "@/shared/components/ModelCapabilityBadges";
 
-export default function ModelRow({ model, fullModel, alias, copied, onCopy, testStatus, isCustom, isFree, onDeleteAlias, onTest, isTesting, onDisable, onEnable, hidden, caps, thinkingSuffix, selected, onToggleSelected, batchResult }) {
+export default function ModelRow({ model, fullModel, alias, copied, onCopy, testStatus, isCustom, isFree, onDeleteAlias, onTest, isTesting, onDisable, onEnable, hidden, caps, thinkingSuffix, selected, onToggleSelected, batchResult, capabilityEvidence }) {
   const displayModel = thinkingSuffix ? `${fullModel}(${thinkingSuffix})` : fullModel;
   const borderColor = testStatus === "ok"
     ? "border-green-500/40"
@@ -38,6 +39,7 @@ export default function ModelRow({ model, fullModel, alias, copied, onCopy, test
           <span className="flex min-w-0 items-center text-[9px] gap-1 pl-1">
             {model.name && <span className="break-all sm:truncate text-[9px] italic text-text-muted/70">{model.name}</span>}
             <CapacityBadges caps={caps} colorOverride="text-text-muted/70" size={12} />
+            <ModelCapabilityBadges capabilities={capabilityEvidence} />
             {batchResult && (
               <span className={`rounded px-1.5 py-0.5 ${batchResult.ok ? "bg-green-500/10 text-green-600" : "bg-amber-500/10 text-amber-600"}`}>
                 {batchResult.classification}
@@ -124,4 +126,5 @@ ModelRow.propTypes = {
     ok: PropTypes.bool,
     classification: PropTypes.string,
   }),
+  capabilityEvidence: PropTypes.object,
 };

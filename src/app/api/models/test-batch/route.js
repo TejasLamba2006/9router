@@ -1,4 +1,5 @@
-import { getCustomModels, getProviderConnectionById } from "@/lib/localDb";
+import { getCustomModels, getProviderConnectionById, upsertModelCapabilityEvidence } from "@/lib/localDb";
+import { runModelCapabilityProbeGroup } from "@/lib/modelCapabilityProbe";
 import { getModelsByProviderId } from "@/shared/constants/models";
 import { runModelProbe } from "@/lib/modelProbe";
 import { runModelTestBatch } from "@/lib/modelTestBatch";
@@ -20,6 +21,7 @@ function validateBody(body) {
   if (body.modelIds.some((id) => typeof id !== "string" || !id.trim() || id.length > MAX_MODEL_ID_LENGTH)) return "Invalid modelIds";
   const cooldownMs = body.cooldownMs ?? 5000;
   if (!Number.isInteger(cooldownMs) || cooldownMs < 0 || cooldownMs > 60000) return "Invalid cooldownMs";
+  if (body.verifyCapabilities !== undefined && typeof body.verifyCapabilities !== "boolean") return "Invalid verifyCapabilities";
   return null;
 }
 
@@ -84,7 +86,27 @@ export async function POST(request) {
           cooldownMs: body.cooldownMs ?? 5000,
           autoHideHardFailures: body.autoHideHardFailures === true,
           signal: runController.signal,
-          probe: (model) => runModelProbe({ provider: providerId, model, connectionId, signal: runController.signal, origin: "model_health" }),
+          probe: async (model) => {
+            const health = await runModelProbe({ provider: providerId, model, connectionId, signal: runController.signal, origin: "model_health" });
+            if (!body.verifyCapabilities || health.classification !== "healthy") return health;
+            const capabilities = await runModelCapabilityProbeGroup({
+              provider: providerId,
+              model,
+              connectionId,
+              signal: runController.signal,
+              probe: ({ capability, body: probeBody, signal }) => runModelProbe({
+                provider: providerId,
+                model,
+                connectionId,
+                signal,
+                origin: `model_capability_${capability}`,
+                body: probeBody,
+              }),
+            });
+            if (!capabilities || runController.signal.aborted) return { ...health, classification: "skipped", ok: false };
+            await upsertModelCapabilityEvidence(Object.values(capabilities));
+            return { ...health, capabilities };
+          },
           hide: (model) => disableCanonicalModels(providerId, [model]),
           onResult: (probeResult, index) => line(controller, { type: "result", index, done: index + 1, total: modelIds.length, result: probeResult }),
           onWait: (delayMs, model, index) => line(controller, { type: "wait", delayMs, model, done: index + 1, total: modelIds.length }),

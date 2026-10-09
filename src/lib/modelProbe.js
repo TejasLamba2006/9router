@@ -43,7 +43,7 @@ export function sanitizeProbeMessage(message, secrets = []) {
   return safe.replace(/[\r\n]+/g, " ").slice(0, 500);
 }
 
-function extractProbeEvidence(payload) {
+export function extractProbeEvidence(payload) {
   const choice = payload?.choices?.[0];
   if (choice) {
     return {
@@ -75,7 +75,7 @@ function extractProbeEvidence(payload) {
   return { text: "", finishReason: null, toolCalls: [], reasoning: "", usage: payload?.usage || null };
 }
 
-export async function runModelProbe({ provider, model, kind = "llm", connectionId, signal, timeoutMs = 30000, origin = "model_health" }) {
+export async function runModelProbe({ provider, model, kind = "llm", connectionId, signal, timeoutMs = 30000, origin = "model_health", body }) {
   const startedAt = Date.now();
   if (kind !== "llm") {
     return { modelId: model, kind, classification: "skipped", ok: false, status: null, latencyMs: 0, retryAfterMs: 0, message: "Only LLM health probes are supported", evidence: null };
@@ -100,10 +100,12 @@ export async function runModelProbe({ provider, model, kind = "llm", connectionI
     const settings = await getSettings();
     const result = await handleChatCore({
       body: {
+        ...(body || {
+          messages: [{ role: "user", content: "Reply with exactly OK." }],
+          max_tokens: 32,
+          stream: false,
+        }),
         model: `${resolved.provider}/${resolved.model}`,
-        messages: [{ role: "user", content: "Reply with exactly OK." }],
-        max_tokens: 32,
-        stream: false,
       },
       modelInfo: resolved,
       credentials: refreshed,

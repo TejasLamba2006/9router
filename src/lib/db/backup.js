@@ -51,7 +51,7 @@ export function backupDbLite(adapter, destDir, destName = "data.sqlite") {
     adapter.transaction(() => {
       for (const t of tables) {
         // Recreate table structure in backup DB, then copy rows.
-        const createSql = t.sql.replace(/CREATE TABLE\s+/i, "CREATE TABLE bak.");
+        const createSql = t.sql.replace(/CREATE TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?/i, "CREATE TABLE bak.");
         adapter.exec(createSql);
         adapter.exec(`INSERT INTO bak.${t.name} SELECT * FROM main.${t.name}`);
       }

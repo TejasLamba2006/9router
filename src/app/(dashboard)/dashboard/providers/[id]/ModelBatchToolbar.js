@@ -34,6 +34,10 @@ export default function ModelBatchToolbar({ batch, shownIds }) {
         <input type="checkbox" checked={batch.autoHide} onChange={(event) => batch.setAutoHide(event.target.checked)} />
         Auto-hide hard failures
       </label>
+      <label className="flex items-center gap-1">
+        <input type="checkbox" checked={batch.verifyCapabilities} onChange={(event) => batch.setVerifyCapabilities(event.target.checked)} />
+        Verify capabilities
+      </label>
       <Button size="sm" variant="secondary" icon="science" onClick={() => batch.run(batch.selectedIds)} disabled={batch.selectedIds.length === 0 || batch.state?.running}>
         Test selected ({batch.selectedIds.length})
       </Button>
@@ -62,6 +66,8 @@ ModelBatchToolbar.propTypes = {
     setCooldownSeconds: PropTypes.func.isRequired,
     autoHide: PropTypes.bool.isRequired,
     setAutoHide: PropTypes.func.isRequired,
+    verifyCapabilities: PropTypes.bool.isRequired,
+    setVerifyCapabilities: PropTypes.func.isRequired,
     state: PropTypes.object,
     run: PropTypes.func.isRequired,
     cancel: PropTypes.func.isRequired,

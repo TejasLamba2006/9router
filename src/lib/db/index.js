@@ -57,6 +57,11 @@ export {
   getDisabledModels, getDisabledByProvider, disableModels, enableModels,
 } from "./repos/disabledModelsRepo.js";
 
+// Model capability evidence
+export {
+  upsertModelCapabilityEvidence, getModelCapabilityEvidence, deleteModelCapabilityEvidence,
+} from "./repos/modelCapabilityEvidenceRepo.js";
+
 // Usage
 export {
   statsEmitter, trackPendingRequest, getActiveRequests,
