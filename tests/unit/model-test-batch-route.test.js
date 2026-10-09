@@ -63,10 +63,19 @@ describe("model test batch route", () => {
     expect((await run({ providerId: "openai", connectionId: "conn-a", modelIds: ["a"], cooldownMs: 60001 })).response.status).toBe(400);
   });
 
-  it("rejects cross-origin starts", async () => {
-    const request = new Request("http://localhost/api/models/test-batch", {
+  it("accepts the browser origin when Next rewrites the internal request URL host", async () => {
+    const request = new Request("http://internal:3000/api/models/test-batch", {
       method: "POST",
-      headers: { "Content-Type": "application/json", Origin: "https://evil.example" },
+      headers: { "Content-Type": "application/json", Origin: "http://localhost:20128", Host: "localhost:20128" },
+      body: JSON.stringify({ providerId: "openai", connectionId: "conn-a", modelIds: ["a"], cooldownMs: 0 }),
+    });
+    expect((await POST(request)).status).toBe(200);
+  });
+
+  it("rejects cross-origin starts", async () => {
+    const request = new Request("http://internal:3000/api/models/test-batch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: "https://evil.example", Host: "localhost:20128" },
       body: JSON.stringify({ providerId: "openai", connectionId: "conn-a", modelIds: ["a"] }),
     });
     expect((await POST(request)).status).toBe(403);

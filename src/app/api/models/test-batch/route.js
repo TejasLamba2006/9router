@@ -26,8 +26,13 @@ function validateBody(body) {
 export async function POST(request) {
   const origin = request.headers.get("origin");
   if (origin) {
-    const expected = new URL(request.url).origin;
-    if (origin !== expected) return Response.json({ error: "Origin not allowed" }, { status: 403 });
+    const host = request.headers.get("x-forwarded-host") || request.headers.get("host");
+    const protocol = request.headers.get("x-forwarded-proto") || new URL(request.url).protocol.slice(0, -1);
+    let allowed = false;
+    try {
+      allowed = Boolean(host) && new URL(origin).origin === `${protocol}://${host}`;
+    } catch {}
+    if (!allowed) return Response.json({ error: "Origin not allowed" }, { status: 403 });
   }
 
   let body;
