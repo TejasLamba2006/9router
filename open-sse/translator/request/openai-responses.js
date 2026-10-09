@@ -444,6 +444,25 @@ export function openaiToOpenAIResponsesRequest(model, body, stream, credentials)
     }).filter(Boolean);
   }
 
+  // tool_choice: Chat nests the name under function{}, Responses puts it flat.
+  // Dropping it silently turns a forced tool into a free choice, so a forced
+  // tool that also fell outside the 128-tool cap would never be callable.
+  if (body.tool_choice !== undefined) {
+    const tc = body.tool_choice;
+    if (typeof tc === "string") {
+      result.tool_choice = tc;
+    } else if (tc && typeof tc === "object") {
+      if (tc.type === "function" && tc.function?.name) {
+        result.tool_choice = { type: "function", name: tc.function.name };
+      } else if (tc.type === "function" && tc.name) {
+        result.tool_choice = { type: "function", name: tc.name };
+      } else if (tc.type) {
+        result.tool_choice = { type: tc.type };
+      }
+    }
+  }
+  if (body.parallel_tool_calls !== undefined) result.parallel_tool_calls = body.parallel_tool_calls;
+
   // Pass through other relevant fields
   if (body.temperature !== undefined) result.temperature = body.temperature;
   if (body.max_output_tokens !== undefined) {
