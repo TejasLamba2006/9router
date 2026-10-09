@@ -23,6 +23,7 @@ beforeEach(() => {
     provider: "openai-compatible-chat-test",
     connectionId: "conn-1",
     models: [{ id: "m1" }, { id: "m2" }, { id: "m3" }],
+    authoritative: true,
   }));
   mocks.upsertCustomModels.mockResolvedValue({ fetched: 3, added: 3, updated: 0, unchanged: 0, invalid: 0, stale: 0 });
 });
@@ -48,10 +49,24 @@ describe("provider model refresh", () => {
   });
 
   it("does not write or stale entries on an empty upstream response", async () => {
-    mocks.routeGet.mockResolvedValue(Response.json({ models: [] }));
+    mocks.routeGet.mockResolvedValue(Response.json({ models: [], authoritative: true }));
     const result = await refreshProviderModels({ connectionId: "conn-1" });
     expect(mocks.upsertCustomModels).not.toHaveBeenCalled();
     expect(result[0]).toMatchObject({ fetched: 0, added: 0, stale: 0 });
+  });
+
+  it("imports fallback catalogs without treating them as authoritative", async () => {
+    mocks.routeGet.mockResolvedValue(Response.json({
+      models: [{ id: "static-fallback" }],
+      warning: "Live model fetch failed; falling back to static catalog.",
+      authoritative: false,
+    }));
+    const result = await refreshProviderModels({ connectionId: "conn-1" });
+    expect(mocks.upsertCustomModels).toHaveBeenCalledWith(expect.objectContaining({
+      models: [{ id: "static-fallback", name: "static-fallback", reported: {} }],
+      authoritative: false,
+    }));
+    expect(result[0]).toMatchObject({ fetched: 1 });
   });
 
   it("does not persist a catalog after the request is aborted", async () => {
@@ -67,12 +82,26 @@ describe("provider model refresh", () => {
 
   it("coalesces duplicate refreshes for the same connection", async () => {
     let release;
-    mocks.routeGet.mockImplementation(() => new Promise((resolve) => { release = () => resolve(Response.json({ models: [{ id: "m1" }] })); }));
+    mocks.routeGet.mockImplementation(() => new Promise((resolve) => { release = () => resolve(Response.json({ models: [{ id: "m1" }], authoritative: true })); }));
     const first = refreshProviderModels({ connectionId: "conn-1" });
     const second = refreshProviderModels({ connectionId: "conn-1" });
     await vi.waitFor(() => expect(mocks.routeGet).toHaveBeenCalledTimes(1));
     release();
     await expect(Promise.all([first, second])).resolves.toEqual([
+      [expect.objectContaining({ added: 3 })],
+      [expect.objectContaining({ added: 3 })],
+    ]);
+    expect(mocks.upsertCustomModels).toHaveBeenCalledTimes(1);
+  });
+
+  it("coalesces a full refresh with a manual refresh of the same connection", async () => {
+    let release;
+    mocks.routeGet.mockImplementation(() => new Promise((resolve) => { release = () => resolve(Response.json({ models: [{ id: "m1" }], authoritative: true })); }));
+    const full = refreshProviderModels();
+    const manual = refreshProviderModels({ connectionId: "conn-1" });
+    await vi.waitFor(() => expect(mocks.routeGet).toHaveBeenCalledTimes(1));
+    release();
+    await expect(Promise.all([full, manual])).resolves.toEqual([
       [expect.objectContaining({ added: 3 })],
       [expect.objectContaining({ added: 3 })],
     ]);

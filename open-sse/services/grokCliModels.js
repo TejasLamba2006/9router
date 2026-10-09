@@ -75,6 +75,7 @@ export async function resolveGrokCliModels(credentials, options = {}) {
     fetchFn = proxyAwareFetch,
     log = console,
     proxyOptions = null,
+    signal,
     onCredentialsRefreshed,
   } = options;
   let accessToken = credentials?.accessToken;
@@ -85,6 +86,7 @@ export async function resolveGrokCliModels(credentials, options = {}) {
     {
       method: "GET",
       headers: buildHeaders(token, credentials?.providerSpecificData),
+      signal,
     },
     proxyOptions,
   );

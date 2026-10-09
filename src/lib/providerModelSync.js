@@ -31,21 +31,28 @@ const REPORTED_FIELDS = [
 export function normalizeModelList(list, prefixes = []) {
   const seen = new Set();
   const out = [];
+  let invalid = 0;
+  let duplicates = 0;
   for (const m of Array.isArray(list) ? list : []) {
-    if (!m || typeof m !== "object") continue;
+    if (!m || typeof m !== "object" || Array.isArray(m)) { invalid += 1; continue; }
     if (Array.isArray(m.supportedGenerationMethods) && !m.supportedGenerationMethods.includes("generateContent")) continue;
     const raw = m.id || m.name || m.model;
     let id = typeof raw === "string" ? raw.replace(/^models\//, "").trim() : "";
     for (const prefix of Array.isArray(prefixes) ? prefixes : [prefixes]) {
       if (prefix && id.startsWith(`${prefix}/`)) { id = id.slice(prefix.length + 1); break; }
     }
-    if (!id || seen.has(id)) continue;
+    if (!id) { invalid += 1; continue; }
+    if (seen.has(id)) { duplicates += 1; continue; }
     seen.add(id);
     const reported = {};
     for (const field of REPORTED_FIELDS) if (m[field] !== undefined) reported[field] = m[field];
     const display = m.displayName || ((m.id || m.model) && m.name) || id;
     out.push({ id, name: typeof display === "string" && display.trim() ? display.trim() : id, reported });
   }
+  Object.defineProperties(out, {
+    invalid: { value: invalid, enumerable: false },
+    duplicates: { value: duplicates, enumerable: false },
+  });
   return out;
 }
 
@@ -61,18 +68,26 @@ export async function syncConnectionModels(conn, { fetchModels, alias, builtinId
     return { ...empty, error: signal?.aborted ? "Import cancelled" : (error?.message || String(error)) };
   }
   if (signal?.aborted) return { ...empty, error: "Import cancelled" };
-  const models = normalizeModelList(raw, [conn.provider, alias]);
-  if (models.length === 0) return { ...empty, fetched: Array.isArray(raw) ? raw.length : 0 };
+  const catalog = Array.isArray(raw) ? { models: raw, authoritative: true } : raw || {};
+  const rawModels = Array.isArray(catalog.models) ? catalog.models : [];
+  const models = normalizeModelList(rawModels, [conn.provider, alias]);
+  if (models.length === 0) return { ...empty, fetched: rawModels.length };
   const imported = models.filter(({ id }) => !builtinIds.has(id));
   const saved = await upsertModels({
     providerAlias: alias,
     connectionId: conn.id,
     models: imported,
-    // A non-empty upstream catalog is authoritative even when every returned
-    // id is built in: prior imported extras absent from it can become stale.
-    authoritative: true,
+    // Fallback/static catalogs are useful additions, but only a confirmed live
+    // catalog may mark previously imported entries stale.
+    authoritative: catalog.authoritative === true,
   });
-  return { provider: conn.provider, connectionId: conn.id, ...saved, fetched: models.length };
+  return {
+    provider: conn.provider,
+    connectionId: conn.id,
+    ...saved,
+    fetched: rawModels.length,
+    invalid: (saved.invalid || 0) + models.invalid + models.duplicates,
+  };
 }
 
 export { TYPES_WITH_OWN_FETCH };

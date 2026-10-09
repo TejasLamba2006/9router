@@ -28,11 +28,13 @@ describe("genericModelsConfig", () => {
 });
 
 describe("normalizeModelList", () => {
-  it("reads id, name or model, strips the models/ prefix, drops blanks and duplicates", () => {
+  it("reads id, name or model, strips the models/ prefix, and counts blanks and duplicates", () => {
     const out = normalizeModelList([
       { id: "gpt-x" }, { name: "models/gemini-9" }, { model: "m1" }, { id: "gpt-x" }, { id: " " }, null, {},
     ]);
     expect(out.map((m) => m.id)).toEqual(["gpt-x", "gemini-9", "m1"]);
+    expect(out.invalid).toBe(3);
+    expect(out.duplicates).toBe(1);
   });
 
   it("skips Gemini models that cannot generate content", () => {
@@ -60,7 +62,10 @@ describe("syncConnectionModels", () => {
   });
 
   it("persists all non-built-in models with one batch call", async () => {
-    const d = deps();
+    const d = deps({ fetchModels: vi.fn(async () => ({
+      models: [{ id: "new-1", owned_by: "vendor" }, { id: "built-in" }, { id: "have-it" }],
+      authoritative: true,
+    })) });
     const res = await syncConnectionModels(conn, d);
     expect(d.upsertModels).toHaveBeenCalledTimes(1);
     expect(d.upsertModels).toHaveBeenCalledWith(expect.objectContaining({

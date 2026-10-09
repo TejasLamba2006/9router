@@ -28,13 +28,16 @@ function buildModelListHeaders(token, isApiKey) {
  * Internal: fetch the raw model list from Cline's /models endpoint.
  * Returns the parsed array or null on any failure.
  */
-async function fetchClineRawModels(credentials) {
+async function fetchClineRawModels(credentials, options = {}) {
   const isApiKey = Boolean(credentials?.apiKey);
   const token = isApiKey ? credentials.apiKey : credentials?.accessToken;
   if (!token) return null;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  const signal = options.signal
+    ? AbortSignal.any([options.signal, controller.signal])
+    : controller.signal;
 
   try {
     const headers = buildModelListHeaders(token, isApiKey);
@@ -42,7 +45,7 @@ async function fetchClineRawModels(credentials) {
     const response = await fetch(CLINEPASS_MODELS_ENDPOINT, {
       method: "GET",
       headers,
-      signal: controller.signal,
+      signal,
     });
 
     if (!response.ok) return null;
@@ -64,8 +67,8 @@ async function fetchClineRawModels(credentials) {
  * @param {object} credentials - Connection credentials ({ accessToken, apiKey })
  * @returns {Promise<{ models: { id: string, name: string }[] } | null>}
  */
-export async function resolveClinepassModels(credentials) {
-  const rawList = await fetchClineRawModels(credentials);
+export async function resolveClinepassModels(credentials, options = {}) {
+  const rawList = await fetchClineRawModels(credentials, options);
   if (!rawList) return null;
 
   const models = rawList
@@ -120,8 +123,8 @@ async function fetchClineFreeTierModels() {
  * @param {object} credentials - Connection credentials ({ accessToken, apiKey })
  * @returns {Promise<{ models: { id: string, name: string }[] } | null>}
  */
-export async function resolveClineModels(credentials) {
-  const rawList = await fetchClineRawModels(credentials);
+export async function resolveClineModels(credentials, options = {}) {
+  const rawList = await fetchClineRawModels(credentials, options);
   if (!rawList) return null;
 
   const models = rawList

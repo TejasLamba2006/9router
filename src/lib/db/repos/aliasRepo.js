@@ -72,7 +72,14 @@ export async function addCustomModel({ providerAlias, id, type = "llm", name, ca
     const row = db.get(`SELECT value FROM kv WHERE scope = 'customModels' AND key = ?`, [k]);
     if (row) {
       const prev = parseJson(row.value) || {};
-      const next = { ...prev, ...(name ? { name } : {}), ...(caps ? { caps } : {}), ...(transport ? { transport } : {}) };
+      const next = {
+        ...prev,
+        ...(name ? { name } : {}),
+        ...(caps ? { caps } : {}),
+        ...(transport ? { transport } : {}),
+        source: "manual",
+        stale: false,
+      };
       db.run(`UPDATE kv SET value = ? WHERE scope = 'customModels' AND key = ?`, [stringifyJson(next), k]);
       return;
     }
@@ -117,6 +124,7 @@ export async function upsertCustomModels({ providerAlias, connectionId, models, 
         const value = {
           providerAlias: alias, id, type, name: incoming.name,
           source: "upstream", connectionId: connectionId || null,
+          connectionIds: connectionId ? [connectionId] : [],
           firstSeenAt: fetchedAt, lastSeenAt: fetchedAt, stale: false,
           ...(Object.keys(incoming.reported).length ? { reported: incoming.reported } : {}),
         };
@@ -127,11 +135,17 @@ export async function upsertCustomModels({ providerAlias, connectionId, models, 
 
       const prev = found.value;
       const manual = prev.source === "manual" || prev.source == null;
+      const connectionIds = [...new Set([
+        ...(Array.isArray(prev.connectionIds) ? prev.connectionIds : []),
+        ...(prev.connectionId ? [prev.connectionId] : []),
+        ...(connectionId ? [connectionId] : []),
+      ])];
       const next = {
         ...prev,
         ...(manual ? {} : { name: incoming.name }),
         source: manual ? "manual" : "upstream",
         connectionId: connectionId || prev.connectionId || null,
+        connectionIds,
         firstSeenAt: prev.firstSeenAt || fetchedAt,
         lastSeenAt: fetchedAt,
         stale: false,
@@ -147,13 +161,23 @@ export async function upsertCustomModels({ providerAlias, connectionId, models, 
       else result.unchanged += 1;
     }
 
+    if (!authoritative) return;
     for (const [id, found] of existing) {
-      if (normalized.has(id)
-        || found.value.source !== "upstream"
-        || found.value.connectionId !== connectionId
-        || found.value.stale === true) continue;
-      db.run(`UPDATE kv SET value = ? WHERE scope = 'customModels' AND key = ?`, [stringifyJson({ ...found.value, stale: true }), found.key]);
-      result.stale += 1;
+      if (normalized.has(id) || found.value.source !== "upstream" || found.value.stale === true) continue;
+      const connectionIds = [...new Set([
+        ...(Array.isArray(found.value.connectionIds) ? found.value.connectionIds : []),
+        ...(found.value.connectionId ? [found.value.connectionId] : []),
+      ])];
+      if (!connectionIds.includes(connectionId)) continue;
+      const remainingConnectionIds = connectionIds.filter((id) => id !== connectionId);
+      const next = {
+        ...found.value,
+        connectionIds: remainingConnectionIds,
+        connectionId: remainingConnectionIds.at(-1) || null,
+        stale: remainingConnectionIds.length === 0,
+      };
+      db.run(`UPDATE kv SET value = ? WHERE scope = 'customModels' AND key = ?`, [stringifyJson(next), found.key]);
+      if (next.stale) result.stale += 1;
     }
   });
   return result;

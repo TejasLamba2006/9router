@@ -28,6 +28,30 @@ afterAll(() => {
 });
 
 describe("custom model batch upsert", () => {
+  it("rolls back the whole catalog when one write fails", async () => {
+    const adapter = global._dbAdapter.instance;
+    const originalRun = adapter.run;
+    let writes = 0;
+    adapter.run = (sql, params) => {
+      if (sql.includes("INSERT INTO kv(scope, key, value) VALUES('customModels'")) {
+        writes += 1;
+        if (writes === 2) throw new Error("simulated write failure");
+      }
+      return originalRun(sql, params);
+    };
+    try {
+      await expect(db.upsertCustomModels({
+        providerAlias: "rollback",
+        connectionId: "conn-rollback",
+        models: [{ id: "a" }, { id: "b" }, { id: "c" }],
+        authoritative: true,
+      })).rejects.toThrow("simulated write failure");
+      expect((await db.getCustomModels()).filter((m) => m.providerAlias === "rollback")).toEqual([]);
+    } finally {
+      adapter.run = originalRun;
+    }
+  });
+
   it("writes a 1,000-model catalog in one transaction", async () => {
     const adapter = global._dbAdapter.instance;
     const originalTransaction = adapter.transaction;
@@ -114,17 +138,43 @@ describe("custom model batch upsert", () => {
     expect(model.lastSeenAt).toBe("2026-10-10T01:05:00.000Z");
   });
 
+  it("turns an imported row into a manual override when it is explicitly re-added", async () => {
+    await db.upsertCustomModels({
+      providerAlias: "manual-override",
+      connectionId: "conn-import",
+      models: [{ id: "m1", name: "Upstream name" }],
+      fetchedAt: "2026-10-10T01:10:00.000Z",
+    });
+
+    await db.addCustomModel({
+      providerAlias: "manual-override",
+      id: "m1",
+      name: "Operator name",
+      caps: { vision: true },
+    });
+
+    const model = (await db.getCustomModels()).find((m) => m.providerAlias === "manual-override" && m.id === "m1");
+    expect(model).toMatchObject({
+      name: "Operator name",
+      source: "manual",
+      stale: false,
+      caps: { vision: true },
+    });
+  });
+
   it("marks only absent upstream models stale and clears stale on reappearance", async () => {
     await db.upsertCustomModels({
       providerAlias: "stale-test",
       connectionId: "conn-3",
       models: [{ id: "a" }, { id: "b" }],
+      authoritative: true,
       fetchedAt: "2026-10-10T02:00:00.000Z",
     });
     const missing = await db.upsertCustomModels({
       providerAlias: "stale-test",
       connectionId: "conn-3",
       models: [{ id: "a" }],
+      authoritative: true,
       fetchedAt: "2026-10-10T03:00:00.000Z",
     });
     expect(missing.stale).toBe(1);
@@ -139,6 +189,7 @@ describe("custom model batch upsert", () => {
       providerAlias: "stale-test",
       connectionId: "conn-3",
       models: [{ id: "a" }, { id: "b" }],
+      authoritative: true,
       fetchedAt: "2026-10-10T04:00:00.000Z",
     });
     expect(back).toMatchObject({ updated: 1, unchanged: 1 });
@@ -150,25 +201,46 @@ describe("custom model batch upsert", () => {
     await db.upsertCustomModels({
       providerAlias: "multi-account",
       connectionId: "conn-a",
-      models: [{ id: "only-a" }],
+      models: [{ id: "shared" }, { id: "only-a" }],
       fetchedAt: "2026-10-10T04:30:00.000Z",
     });
     await db.upsertCustomModels({
       providerAlias: "multi-account",
       connectionId: "conn-b",
-      models: [{ id: "only-b" }],
+      models: [{ id: "shared" }, { id: "only-b" }],
       fetchedAt: "2026-10-10T04:31:00.000Z",
     });
 
     const result = await db.upsertCustomModels({
       providerAlias: "multi-account",
-      connectionId: "conn-a",
-      models: [{ id: "only-a" }],
+      connectionId: "conn-b",
+      models: [{ id: "only-b" }],
       fetchedAt: "2026-10-10T04:32:00.000Z",
     });
     expect(result.stale).toBe(0);
-    const other = (await db.getCustomModels()).find((m) => m.providerAlias === "multi-account" && m.id === "only-b");
-    expect(other.stale).toBe(false);
+    const models = (await db.getCustomModels()).filter((m) => m.providerAlias === "multi-account");
+    expect(models.find((m) => m.id === "only-a").stale).toBe(false);
+    expect(models.find((m) => m.id === "shared").stale).toBe(false);
+  });
+
+  it("does not stale missing entries from a non-authoritative fallback catalog", async () => {
+    await db.upsertCustomModels({
+      providerAlias: "fallback-test",
+      connectionId: "conn-fallback",
+      models: [{ id: "a" }, { id: "b" }],
+      authoritative: true,
+      fetchedAt: "2026-10-10T04:45:00.000Z",
+    });
+    const result = await db.upsertCustomModels({
+      providerAlias: "fallback-test",
+      connectionId: "conn-fallback",
+      models: [{ id: "a" }],
+      authoritative: false,
+      fetchedAt: "2026-10-10T04:46:00.000Z",
+    });
+    expect(result.stale).toBe(0);
+    const model = (await db.getCustomModels()).find((m) => m.providerAlias === "fallback-test" && m.id === "b");
+    expect(model.stale).toBe(false);
   });
 
   it("treats an empty catalog as non-authoritative and changes nothing", async () => {

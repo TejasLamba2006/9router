@@ -89,14 +89,14 @@ const getStaticProviderModels = (providerId) =>
 
 // Generic custom resolver for OAuth providers that need refresh-on-401 + token persist.
 // Receives a `fetchFn(token)` and returns parsed models or throws.
-const buildOAuthResolver = ({ refreshFn, fetchFn, parseFn, errorLabel }) => async (connection) => {
+const buildOAuthResolver = ({ refreshFn, fetchFn, parseFn, errorLabel }) => async (connection, options = {}) => {
   const { accessToken, refreshToken } = connection;
   if (!accessToken) {
     return { error: "No valid token found", status: 401 };
   }
   let warning;
   try {
-    let response = await fetchFn(accessToken, connection);
+    let response = await fetchFn(accessToken, connection, options);
     if (!response.ok && (response.status === 401 || response.status === 403) && refreshToken) {
       const refreshed = await refreshFn(connection);
       if (refreshed?.accessToken) {
@@ -107,7 +107,7 @@ const buildOAuthResolver = ({ refreshFn, fetchFn, parseFn, errorLabel }) => asyn
         });
         connection.accessToken = refreshed.accessToken;
         if (refreshed.refreshToken) connection.refreshToken = refreshed.refreshToken;
-        response = await fetchFn(refreshed.accessToken, connection);
+        response = await fetchFn(refreshed.accessToken, connection, options);
       }
     }
     if (response.ok) {
@@ -131,7 +131,7 @@ const buildOAuthResolver = ({ refreshFn, fetchFn, parseFn, errorLabel }) => asyn
 // region's catalog endpoint, and the ids keep the provider prefix.
 function buildQoderModelsResolver(providerId) {
   return {
-    customResolver: async (connection) => {
+    customResolver: async (connection, options = {}) => {
       const credentials = {
         provider: providerId,
         accessToken: connection.accessToken,
@@ -143,7 +143,11 @@ function buildQoderModelsResolver(providerId) {
       };
       let warning;
       try {
-        const result = await resolveQoderModels(credentials, { forceRefresh: true });
+        const result = await resolveQoderModels(credentials, {
+          forceRefresh: true,
+          signal: options.signal,
+          proxyOptions: options.proxyOptions,
+        });
         if (result?.models?.length) {
           return {
             models: result.models.map((m) => ({
@@ -199,7 +203,7 @@ const PROVIDER_MODELS_CONFIG = {
   codex: {
     customResolver: buildOAuthResolver({
       refreshFn: (conn) => refreshCodexToken(conn.refreshToken),
-      fetchFn: (token) => fetch(CODEX_MODELS_URL, {
+      fetchFn: (token, _conn, options) => options.fetchUpstream(CODEX_MODELS_URL, {
         method: "GET",
         headers: {
           "Content-Type": "application/json",
@@ -316,12 +320,17 @@ const PROVIDER_MODELS_CONFIG = {
   agnes: createOpenAIModelsConfig("https://apihub.agnes-ai.com/v1/models"),
   bai: createOpenAIModelsConfig("https://api.b.ai/v1/models"),
   kimchi: {
-    customResolver: async (connection) => {
+    customResolver: async (connection, options = {}) => {
       const result = await resolveKimchiModels({
         accessToken: connection.accessToken,
         apiKey: connection.apiKey,
         providerSpecificData: connection.providerSpecificData || {},
-      }, { forceRefresh: true, log: console });
+      }, {
+        forceRefresh: true,
+        log: console,
+        signal: options.signal,
+        proxyOptions: options.proxyOptions,
+      });
       if (result?.models?.length) {
         return { models: result.models };
       }
@@ -332,11 +341,16 @@ const PROVIDER_MODELS_CONFIG = {
     }
   },
   cursor: {
-    customResolver: async (connection) => {
+    customResolver: async (connection, options = {}) => {
       const result = await resolveCursorModels({
         accessToken: connection.accessToken,
         providerSpecificData: connection.providerSpecificData || {},
-      }, { forceRefresh: true, log: console });
+      }, {
+        forceRefresh: true,
+        log: console,
+        signal: options.signal,
+        proxyOptions: options.proxyOptions,
+      });
       if (result?.models?.length) return { models: result.models };
       return {
         models: getStaticProviderModels("cursor"),
@@ -349,12 +363,17 @@ const PROVIDER_MODELS_CONFIG = {
   // exposed to the browser), return rich metadata, drop disabled entries.
   // Empty/failure yields an explicit warning, never a silent zero list.
   zed: {
-    customResolver: async (connection) => {
+    customResolver: async (connection, options = {}) => {
       try {
         const result = await resolveZedModels({
           accessToken: connection.accessToken,
           providerSpecificData: connection.providerSpecificData || {},
-        }, { config: ZED_HOSTED_CONFIG, forceRefresh: true });
+        }, {
+          config: ZED_HOSTED_CONFIG,
+          forceRefresh: true,
+          signal: options.signal,
+          proxyOptions: options.proxyOptions,
+        });
         const models = (result?.models || [])
           .filter((m) => m && !m.isDisabled)
           .map((m) => ({
@@ -388,11 +407,11 @@ const PROVIDER_MODELS_CONFIG = {
   // the cursor direct pattern (no refreshFn) and only differ in filtering:
   // cline returns the whole catalog verbatim, clinepass keeps cline-pass/* only.
   cline: {
-    customResolver: async (connection) => {
+    customResolver: async (connection, options = {}) => {
       const result = await resolveClineModels({
         accessToken: connection.accessToken,
         apiKey: connection.apiKey,
-      });
+      }, { signal: options.signal });
       if (result?.models?.length) return { models: result.models };
       return {
         models: getStaticProviderModels("cline"),
@@ -401,11 +420,11 @@ const PROVIDER_MODELS_CONFIG = {
     },
   },
   clinepass: {
-    customResolver: async (connection) => {
+    customResolver: async (connection, options = {}) => {
       const result = await resolveClinepassModels({
         accessToken: connection.accessToken,
         apiKey: connection.apiKey,
-      });
+      }, { signal: options.signal });
       if (result?.models?.length) return { models: result.models };
       return {
         models: getStaticProviderModels("clinepass"),
@@ -416,7 +435,7 @@ const PROVIDER_MODELS_CONFIG = {
 
   // Custom resolvers (non-OpenAI-shaped APIs / token-refresh flows)
   kiro: {
-    customResolver: async (connection) => {
+    customResolver: async (connection, options = {}) => {
       const credentials = {
         accessToken: connection.accessToken,
         refreshToken: connection.refreshToken,
@@ -426,6 +445,7 @@ const PROVIDER_MODELS_CONFIG = {
       try {
         const result = await resolveKiroModels(credentials, {
           log: console,
+          signal: options.signal,
           onCredentialsRefreshed: async (refreshed) => {
             if (refreshed?.accessToken) {
               await updateProviderCredentials(connection.id, {
@@ -464,10 +484,10 @@ const PROVIDER_MODELS_CONFIG = {
   "gemini-cli": {
     customResolver: buildOAuthResolver({
       refreshFn: (conn) => refreshGoogleToken(conn.refreshToken, GEMINI_CONFIG.clientId, GEMINI_CONFIG.clientSecret),
-      fetchFn: (token, conn) => {
+      fetchFn: (token, conn, options) => {
         const projectId = conn.projectId || conn.providerSpecificData?.projectId;
         const body = projectId ? { project: projectId } : {};
-        return fetch(GEMINI_CLI_MODELS_URL, {
+        return options.fetchUpstream(GEMINI_CLI_MODELS_URL, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -483,13 +503,14 @@ const PROVIDER_MODELS_CONFIG = {
     })
   },
   "grok-cli": {
-    customResolver: async (connection) => {
+    customResolver: async (connection, options = {}) => {
       const proxy = await resolveConnectionProxyConfig(connection.providerSpecificData || {});
       const result = await resolveGrokCliModels({
         ...connection,
         connectionId: connection.id,
       }, {
         log: console,
+        signal: options.signal,
         proxyOptions: {
           connectionProxyEnabled: proxy.connectionProxyEnabled === true,
           connectionProxyUrl: proxy.connectionProxyUrl || "",
@@ -512,12 +533,13 @@ const PROVIDER_MODELS_CONFIG = {
     },
   },
   "ollama-local": {
-    customResolver: async (connection) => {
+    customResolver: async (connection, options = {}) => {
       const url = `${resolveOllamaLocalHost(connection)}/api/tags`;
-      const response = await fetch(url, {
+      const response = await proxyAwareFetch(url, {
         method: "GET",
-        headers: { "Content-Type": "application/json" }
-      });
+        headers: { "Content-Type": "application/json" },
+        signal: options.signal,
+      }, options.proxyOptions);
       if (!response.ok) {
         const errorText = await response.text();
         console.log("Error fetching models from ollama-local:", errorText);
@@ -574,7 +596,8 @@ export async function GET(request, { params }) {
       return NextResponse.json({
         provider: connection.provider,
         connectionId: connection.id,
-        models
+        models,
+        authoritative: true,
       });
     }
 
@@ -615,7 +638,8 @@ export async function GET(request, { params }) {
       return NextResponse.json({
         provider: connection.provider,
         connectionId: connection.id,
-        models
+        models,
+        authoritative: true,
       });
     }
 
@@ -629,7 +653,11 @@ export async function GET(request, { params }) {
 
     // Config-driven custom resolver path (OAuth refresh, non-OpenAI shape, etc.)
     if (typeof config.customResolver === "function") {
-      const result = await config.customResolver(connection);
+      const result = await config.customResolver(connection, {
+        signal: upstreamSignal,
+        proxyOptions,
+        fetchUpstream,
+      });
       if (result.error) {
         return NextResponse.json({ error: result.error }, { status: result.status || 500 });
       }
@@ -637,6 +665,7 @@ export async function GET(request, { params }) {
         provider: connection.provider,
         connectionId: connection.id,
         models: result.models,
+        authoritative: !result.warning,
         ...(result.warning ? { warning: result.warning } : {})
       });
     }
@@ -686,7 +715,8 @@ export async function GET(request, { params }) {
     return NextResponse.json({
       provider: connection.provider,
       connectionId: connection.id,
-      models
+      models,
+      authoritative: true,
     });
   } catch (error) {
     console.log("Error fetching provider models:", error);
