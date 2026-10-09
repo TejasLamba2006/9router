@@ -289,6 +289,14 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
         };
       }
 
+      // `finalResp` above is an OpenAI Chat Completions intermediary for every
+      // non-Responses client. Claude callers still need an Anthropic message —
+      // the standard forced-SSE branch does this conversion below, but the
+      // Responses-upstream branch previously leaked chat.completion JSON.
+      if (sourceFormat === FORMATS.CLAUDE) {
+        finalResp = openAICompletionToClaudeMessage(finalResp);
+      }
+
       const interceptedResp = await applyWebSearchFallback({ translatedResponse: finalResp, sourceFormat, fallbackPlan: webSearchFallbackPlan, log });
       return { success: true, response: new Response(JSON.stringify(restoreToolNames(interceptedResp, toolNameMap)), { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } }) };
     } catch (err) {

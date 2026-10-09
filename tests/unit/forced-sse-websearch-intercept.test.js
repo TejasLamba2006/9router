@@ -199,6 +199,32 @@ describe("forced-SSE path returns Claude shape to Claude clients", () => {
     expect(json.stop_reason).toBe("tool_use");
   });
 
+  it("converts a Responses-API tool call to Claude message/tool_use", async () => {
+    const events = [
+      "event: response.output_item.done",
+      'data: {"output_index":0,"item":{"id":"fc_1","type":"function_call","call_id":"call_182","name":"probe_182","arguments":"{}"}}',
+      "",
+      "event: response.completed",
+      'data: {"response":{"id":"resp_1","model":"gpt-5.6-sol","usage":{"input_tokens":9,"output_tokens":2,"total_tokens":11}}}',
+      "",
+      "",
+    ].join("\n");
+    const result = await handleForcedSSEToJson(baseCtx({
+      providerResponse: sseResponse(events),
+      provider: "openai-compatible-chat-test",
+      sourceFormat: FORMATS.CLAUDE,
+      targetFormat: FORMATS.OPENAI_RESPONSES,
+    }));
+    const json = await result.response.json();
+    expect(json.type).toBe("message");
+    expect(json.role).toBe("assistant");
+    expect(json.content).toEqual([{ type: "tool_use", id: "call_182", name: "probe_182", input: {} }]);
+    expect(json.stop_reason).toBe("tool_use");
+    expect(json.usage.input_tokens).toBe(9);
+    expect(json.usage.output_tokens).toBe(2);
+    expect(json.choices).toBeUndefined();
+  });
+
   it("leaves OpenAI clients on the chat.completion shape", async () => {
     const result = await handleForcedSSEToJson(baseCtx({
       providerResponse: sseResponse(TEXT_SSE),
