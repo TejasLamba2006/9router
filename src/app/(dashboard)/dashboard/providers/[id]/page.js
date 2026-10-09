@@ -16,6 +16,8 @@ import { fetchSuggestedModels } from "@/shared/utils/providerModelsFetcher";
 import { getProviderCustomModelRows } from "@/shared/utils/providerCustomModels";
 import { filterModelRows } from "@/shared/utils/modelVisibility";
 import ModelVisibilityToolbar from "./ModelVisibilityToolbar";
+import ModelBatchToolbar from "./ModelBatchToolbar";
+import useModelBatchTest from "./useModelBatchTest";
 import ModelRow from "./ModelRow";
 import PassthroughModelsSection from "./PassthroughModelsSection";
 import CompatibleModelsSection from "./CompatibleModelsSection";
@@ -61,9 +63,6 @@ export default function ProviderDetailPage() {
   const [modelAliases, setModelAliases] = useState({});
   const [customModels, setCustomModels] = useState([]);
   const [headerImgError, setHeaderImgError] = useState(false);
-  const [modelTestResults, setModelTestResults] = useState({});
-  const [modelsTestError, setModelsTestError] = useState("");
-  const [testingModelIds, setTestingModelIds] = useState(() => new Set());
   const [showAddCustomModel, setShowAddCustomModel] = useState(false);
   const [selectedConnectionIds, setSelectedConnectionIds] = useState([]);
   const [bulkProxyPoolId, setBulkProxyPoolId] = useState("__none__");
@@ -223,6 +222,7 @@ export default function ProviderDetailPage() {
     return levels && levels.includes(thinkingMode) ? thinkingMode : null;
   };
   const providerStorageAlias = isCompatible ? providerId : providerAlias;
+  const supportsStrictModelTests = !isFreeNoAuth && providerId !== "cursor" && providerId !== "zed";
   // Union of levels across this provider's reasoning models — drives the level picker options.
   // Include custom models too (e.g. manually added gpt-5.6-sol → max).
   const providerThinkingLevels = (() => {
@@ -256,6 +256,8 @@ export default function ProviderDetailPage() {
       console.log("Error fetching disabled models:", error);
     }
   }, [providerStorageAlias]);
+
+  const modelBatch = useModelBatchTest({ providerId, connections, onVisibilityChanged: fetchDisabledModels });
 
   const handleDisableModel = async (modelId) => {
     try {
@@ -1107,26 +1109,6 @@ export default function ProviderDetailPage() {
     </Modal>
   );
 
-  const handleTestModel = async (modelId) => {
-    if (testingModelIds.has(modelId)) return;
-    setTestingModelIds((prev) => new Set(prev).add(modelId));
-    try {
-      const res = await fetch("/api/models/test", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: `${providerStorageAlias}/${modelId}` }),
-      });
-      const data = await res.json();
-      setModelTestResults((prev) => ({ ...prev, [modelId]: data.ok ? "ok" : "error" }));
-      setModelsTestError(data.ok ? "" : (data.error || "Model not reachable"));
-    } catch {
-      setModelTestResults((prev) => ({ ...prev, [modelId]: "error" }));
-      setModelsTestError("Network error");
-    } finally {
-      setTestingModelIds((prev) => { const n = new Set(prev); n.delete(modelId); return n; });
-    }
-  };
-
   const renderModelsSection = () => {
     if (isCompatible) {
       return (
@@ -1174,6 +1156,7 @@ export default function ProviderDetailPage() {
       ...allModels.map((model) => ({ ...model, fullModel: `${providerDisplayAlias}/${model.id}` })),
     ];
     const shownRows = filterModelRows(rows, { query: modelQuery, visibility: modelVisibility, disabledIds: disabledModelIds });
+    const visibleShownIds = shownRows.filter((model) => !disabledSet.has(model.id)).map((model) => model.id);
     const counts = {
       all: rows.length,
       visible: rows.filter((model) => !disabledSet.has(model.id)).length,
@@ -1195,6 +1178,7 @@ export default function ProviderDetailPage() {
             for (const id of ids) await handleEnableModel(id);
           }}
         />
+        {supportsStrictModelTests && <ModelBatchToolbar batch={modelBatch} shownIds={visibleShownIds} />}
 
         {shownRows.map((model) => {
           if (model.source) {
@@ -1211,14 +1195,17 @@ export default function ProviderDetailPage() {
                   if (model.source === "custom") handleDeleteCustomModel(model.id, "llm", providerStorageAlias);
                   else handleDeleteAlias(model.alias);
                 }}
-                testStatus={modelTestResults[model.id]}
-                onTest={!hidden && (connections.length > 0 || isFreeNoAuth) ? () => handleTestModel(model.id) : undefined}
-                isTesting={testingModelIds.has(model.id)}
+                testStatus={modelBatch.results[model.id]?.ok === true ? "ok" : modelBatch.results[model.id] ? "error" : undefined}
+                onTest={!hidden && supportsStrictModelTests && modelBatch.activeConnections.length > 0 ? () => modelBatch.run([model.id]) : undefined}
+                isTesting={modelBatch.state?.running && modelBatch.state.current === model.id && !modelBatch.results[model.id]}
                 isCustom
                 isFree={false}
                 onDisable={() => handleDisableModel(model.id)}
                 onEnable={() => handleEnableModel(model.id)}
                 hidden={hidden}
+                selected={modelBatch.selectedIds.includes(model.id)}
+                onToggleSelected={!hidden && supportsStrictModelTests ? () => modelBatch.toggleSelected(model.id) : undefined}
+                batchResult={modelBatch.results[model.id]}
                 caps={getCaps(`${providerId}/${model.id}`)}
                 thinkingSuffix={resolveThinkingSuffix(model.id)}
               />
@@ -1240,13 +1227,16 @@ export default function ProviderDetailPage() {
               onCopy={copy}
               onSetAlias={(alias) => handleSetAlias(model.id, alias, providerStorageAlias)}
               onDeleteAlias={() => handleDeleteAlias(existingAlias)}
-              testStatus={modelTestResults[model.id]}
-              onTest={!hidden && (connections.length > 0 || isFreeNoAuth) ? () => handleTestModel(model.id) : undefined}
-              isTesting={testingModelIds.has(model.id)}
+              testStatus={modelBatch.results[model.id]?.ok === true ? "ok" : modelBatch.results[model.id] ? "error" : undefined}
+              onTest={!hidden && supportsStrictModelTests && modelBatch.activeConnections.length > 0 ? () => modelBatch.run([model.id]) : undefined}
+              isTesting={modelBatch.state?.running && modelBatch.state.current === model.id && !modelBatch.results[model.id]}
               isFree={model.isFree}
               onDisable={() => handleDisableModel(model.id)}
               onEnable={() => handleEnableModel(model.id)}
               hidden={hidden}
+              selected={modelBatch.selectedIds.includes(model.id)}
+              onToggleSelected={!hidden && supportsStrictModelTests ? () => modelBatch.toggleSelected(model.id) : undefined}
+              batchResult={modelBatch.results[model.id]}
               caps={getCaps(`${providerId}/${model.id}`)}
               thinkingSuffix={resolveThinkingSuffix(model.id)}
             />
@@ -1796,35 +1786,6 @@ export default function ProviderDetailPage() {
             );
           })()}
         </div>
-        {!!modelsTestError && (
-          <div className="mb-3">
-            <p className="text-xs text-red-500 break-words">{modelsTestError}</p>
-            {/RegionError|hosted in China|regionNotAllowed/i.test(modelsTestError) && (() => {
-              const str = typeof modelsTestError === "string" ? modelsTestError : JSON.stringify(modelsTestError);
-              const linkMatch = str.match(/https:\/\/opencode\.ai\/workspace\/[^\s"')]+/);
-              const wrkMatch = str.match(/wrk_[0-9A-Za-z]+/);
-              const targetUrl = linkMatch
-                ? (linkMatch[0].endsWith("/go") ? linkMatch[0] : `${linkMatch[0]}/go`)
-                : wrkMatch
-                  ? `https://opencode.ai/workspace/${wrkMatch[0]}/go`
-                  : "https://opencode.ai";
-
-              return (
-                <div className="mt-1.5">
-                  <a
-                    href={targetUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1 rounded-md bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-600 hover:bg-amber-500/20 dark:text-amber-400 transition-colors"
-                  >
-                    <span>Allow China-hosted models</span>
-                    <span className="material-symbols-outlined text-[13px]">open_in_new</span>
-                  </a>
-                </div>
-              );
-            })()}
-          </div>
-        )}
         {providerId === "zed" && !!liveModelsError && (
           <p className="text-xs text-red-500 mb-3 break-words">{liveModelsError}</p>
         )}
@@ -1921,6 +1882,7 @@ export default function ProviderDetailPage() {
       )}
       {!isCompatible && (
         <AddCustomModelModal
+          key={showAddCustomModel ? "open" : "closed"}
           isOpen={showAddCustomModel}
           providerAlias={providerStorageAlias}
           providerDisplayAlias={providerDisplayAlias}

@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import PropTypes from "prop-types";
 import { Button } from "@/shared/components";
 import { getProviderCustomModelRows } from "@/shared/utils/providerCustomModels";
 import { filterModelRows } from "@/shared/utils/modelVisibility";
 import ModelVisibilityToolbar from "./ModelVisibilityToolbar";
+import ModelBatchToolbar from "./ModelBatchToolbar";
+import useModelBatchTest from "./useModelBatchTest";
 function CompatibleModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias, onTest, testStatus, isTesting, hidden, onHide, onUnhide, selected, onToggleSelected, batchResult }) {
   const borderColor = testStatus === "ok"
     ? "border-green-500/40"
@@ -119,37 +121,9 @@ CompatibleModelRow.propTypes = {
 export default function CompatibleModelsSection({ providerStorageAlias, providerDisplayAlias, modelAliases, customModels, copied, onCopy, onDeleteAlias, onAddCustomModel, onDeleteCustomModel, connections, isAnthropic, onImportModels, importing, importMessage, disabledModelIds, onHideModels, onUnhideModels, onVisibilityChanged }) {
   const [newModel, setNewModel] = useState("");
   const [adding, setAdding] = useState(false);
-  const [testingModelId, setTestingModelId] = useState(null);
-  const [modelTestResults, setModelTestResults] = useState({});
   const [query, setQuery] = useState("");
   const [visibility, setVisibility] = useState("all");
-  const [selectedIds, setSelectedIds] = useState([]);
-  const [probeConnectionId, setProbeConnectionId] = useState("");
-  const [cooldownSeconds, setCooldownSeconds] = useState("5");
-  const [autoHide, setAutoHide] = useState(true);
-  const [batchState, setBatchState] = useState(null);
-  const [batchResults, setBatchResults] = useState({});
-  const batchAbortRef = useRef(null);
-
-  useEffect(() => () => batchAbortRef.current?.abort(), []);
-
-  const handleTestModel = async (modelId) => {
-    if (testingModelId) return;
-    setTestingModelId(modelId);
-    try {
-      const res = await fetch("/api/models/test", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: `${providerStorageAlias}/${modelId}` }),
-      });
-      const data = await res.json();
-      setModelTestResults((prev) => ({ ...prev, [modelId]: data.ok ? "ok" : "error" }));
-    } catch {
-      setModelTestResults((prev) => ({ ...prev, [modelId]: "error" }));
-    } finally {
-      setTestingModelId(null);
-    }
-  };
+  const batch = useModelBatchTest({ providerId: providerStorageAlias, connections, onVisibilityChanged });
 
   const allModels = getProviderCustomModelRows({
     customModels,
@@ -187,58 +161,7 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
   };
 
   const canImport = connections.some((conn) => conn.isActive !== false);
-  const activeConnections = connections.filter((conn) => conn.isActive !== false);
   const visibleShownIds = shownModels.filter((model) => !disabledSet.has(model.id)).map((model) => model.id);
-
-  const runBatch = async (modelIds) => {
-    const connectionId = probeConnectionId || activeConnections[0]?.id;
-    if (!connectionId || modelIds.length === 0 || batchState?.running) return;
-    const controller = new AbortController();
-    batchAbortRef.current = controller;
-    setBatchResults({});
-    setBatchState({ running: true, done: 0, total: modelIds.length, current: "", stopReason: null });
-    try {
-      const response = await fetch("/api/models/test-batch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          providerId: providerStorageAlias,
-          connectionId,
-          modelIds,
-          cooldownMs: Math.round(Number(cooldownSeconds || 5) * 1000),
-          autoHideHardFailures: autoHide,
-        }),
-        signal: controller.signal,
-      });
-      if (!response.ok || !response.body) throw new Error((await response.json().catch(() => null))?.error || "Batch test failed");
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-        for (const raw of lines) {
-          if (!raw.trim()) continue;
-          const event = JSON.parse(raw);
-          if (event.type === "result") {
-            setBatchResults((prev) => ({ ...prev, [event.result.modelId]: event.result }));
-            setBatchState((prev) => ({ ...prev, done: event.done, current: event.result.modelId }));
-          } else if (event.type === "done" || event.type === "cancelled") {
-            setBatchState((prev) => ({ ...prev, running: false, done: event.done, stopReason: event.stopReason }));
-          } else if (event.type === "error") throw new Error(event.error);
-        }
-      }
-      if (autoHide) await onVisibilityChanged?.();
-    } catch (error) {
-      if (error?.name !== "AbortError") setBatchState((prev) => ({ ...prev, running: false, error: error.message }));
-    } finally {
-      if (batchAbortRef.current === controller) batchAbortRef.current = null;
-      setBatchState((prev) => prev ? { ...prev, running: false } : prev);
-    }
-  };
 
   return (
     <div className="flex flex-col gap-4">
@@ -285,51 +208,7 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
             onHideShown={onHideModels}
             onUnhideShown={onUnhideModels}
           />
-          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border p-2 text-xs">
-            <select
-              value={probeConnectionId || activeConnections[0]?.id || ""}
-              onChange={(event) => setProbeConnectionId(event.target.value)}
-              aria-label="Probe connection"
-              className="rounded border border-border bg-background px-2 py-1.5"
-            >
-              {activeConnections.map((connection) => (
-                <option key={connection.id} value={connection.id}>{connection.name || connection.email || connection.id}</option>
-              ))}
-            </select>
-            <label className="flex items-center gap-1">
-              Delay
-              <input
-                type="number"
-                min="0"
-                max="60"
-                step="1"
-                value={cooldownSeconds}
-                onChange={(event) => setCooldownSeconds(event.target.value)}
-                className="w-16 rounded border border-border bg-background px-2 py-1"
-              />
-              sec
-            </label>
-            <label className="flex items-center gap-1">
-              <input type="checkbox" checked={autoHide} onChange={(event) => setAutoHide(event.target.checked)} />
-              Auto-hide hard failures
-            </label>
-            <Button size="sm" variant="secondary" icon="science" onClick={() => runBatch(selectedIds)} disabled={selectedIds.length === 0 || batchState?.running}>
-              Test selected ({selectedIds.length})
-            </Button>
-            <Button size="sm" variant="secondary" icon="playlist_play" onClick={() => runBatch(visibleShownIds)} disabled={visibleShownIds.length === 0 || batchState?.running}>
-              Test shown ({visibleShownIds.length})
-            </Button>
-            {batchState?.running && (
-              <Button size="sm" variant="ghost" icon="stop" onClick={() => batchAbortRef.current?.abort()}>
-                Cancel
-              </Button>
-            )}
-            {batchState && (
-              <span className="text-text-muted">
-                {batchState.done}/{batchState.total}{batchState.current ? ` · ${batchState.current}` : ""}{batchState.stopReason ? ` · ${batchState.stopReason}` : ""}
-              </span>
-            )}
-          </div>
+          <ModelBatchToolbar batch={batch} shownIds={visibleShownIds} />
           <div className="flex flex-col gap-3">
             {shownModels.map(({ id, alias, source }) => {
               const hidden = disabledSet.has(id);
@@ -341,15 +220,15 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
                   copied={copied}
                   onCopy={onCopy}
                   onDeleteAlias={() => source === "custom" ? onDeleteCustomModel(id) : onDeleteAlias(alias)}
-                  onTest={!hidden && connections.length > 0 ? () => handleTestModel(id) : undefined}
-                  testStatus={modelTestResults[id]}
-                  isTesting={testingModelId === id}
+                  onTest={!hidden && batch.activeConnections.length > 0 ? () => batch.run([id]) : undefined}
+                  testStatus={batch.results[id]?.ok === true ? "ok" : batch.results[id] ? "error" : undefined}
+                  isTesting={batch.state?.running && batch.state.current === id && !batch.results[id]}
                   hidden={hidden}
                   onHide={() => onHideModels([id])}
                   onUnhide={() => onUnhideModels([id])}
-                  selected={selectedIds.includes(id)}
-                  onToggleSelected={() => setSelectedIds((prev) => prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id])}
-                  batchResult={batchResults[id]}
+                  selected={batch.selectedIds.includes(id)}
+                  onToggleSelected={() => batch.toggleSelected(id)}
+                  batchResult={batch.results[id]}
                 />
               );
             })}

@@ -1,7 +1,7 @@
 import PropTypes from "prop-types";
 import { CapacityBadges } from "@/shared/components";
 
-export default function ModelRow({ model, fullModel, alias, copied, onCopy, testStatus, isCustom, isFree, onDeleteAlias, onTest, isTesting, onDisable, onEnable, hidden, caps, thinkingSuffix }) {
+export default function ModelRow({ model, fullModel, alias, copied, onCopy, testStatus, isCustom, isFree, onDeleteAlias, onTest, isTesting, onDisable, onEnable, hidden, caps, thinkingSuffix, selected, onToggleSelected, batchResult }) {
   const displayModel = thinkingSuffix ? `${fullModel}(${thinkingSuffix})` : fullModel;
   const borderColor = testStatus === "ok"
     ? "border-green-500/40"
@@ -18,6 +18,15 @@ export default function ModelRow({ model, fullModel, alias, copied, onCopy, test
   return (
     <div className={`group w-full sm:w-auto min-w-0 max-w-full rounded-lg border px-3 py-2 ${borderColor} hover:bg-sidebar/50`}>
       <div className="flex min-w-0 items-start gap-2 sm:items-center">
+        {!hidden && onToggleSelected && (
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={onToggleSelected}
+            aria-label={`Select ${model.id}`}
+            className="h-4 w-4 shrink-0 rounded border-border text-primary"
+          />
+        )}
         <span
           className="material-symbols-outlined shrink-0 text-base mt-0.5 sm:mt-0"
           style={iconColor ? { color: iconColor } : undefined}
@@ -29,6 +38,11 @@ export default function ModelRow({ model, fullModel, alias, copied, onCopy, test
           <span className="flex min-w-0 items-center text-[9px] gap-1 pl-1">
             {model.name && <span className="break-all sm:truncate text-[9px] italic text-text-muted/70">{model.name}</span>}
             <CapacityBadges caps={caps} colorOverride="text-text-muted/70" size={12} />
+            {batchResult && (
+              <span className={`rounded px-1.5 py-0.5 ${batchResult.ok ? "bg-green-500/10 text-green-600" : "bg-amber-500/10 text-amber-600"}`}>
+                {batchResult.classification}
+              </span>
+            )}
           </span>
         </div>
         <div className="flex shrink-0 items-center gap-0.5 sm:gap-1">
@@ -104,4 +118,10 @@ ModelRow.propTypes = {
   hidden: PropTypes.bool,
   caps: PropTypes.object,
   thinkingSuffix: PropTypes.string,
+  selected: PropTypes.bool,
+  onToggleSelected: PropTypes.func,
+  batchResult: PropTypes.shape({
+    ok: PropTypes.bool,
+    classification: PropTypes.string,
+  }),
 };
