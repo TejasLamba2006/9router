@@ -37,6 +37,7 @@ export const PROVIDER_ALIASES = {
   "hunyuan": "tencent",
   "doubao": "volcengine",
   "cloudflare-ai": "cloudflare-workers-ai",
+  "codex": "openai",
 };
 
 let state = { running: false, lastSync: null, lastError: null, lastResult: null, etag: null, fileVersion: null };
@@ -60,6 +61,17 @@ function writeAtomic(file, contents) {
 
 // Trimmed copy of the upstream catalog, kept for the add-models skill: same
 // models, ~470KB instead of 4.3MB.
+function modelPricing(model) {
+  const cost = model?.cost || model?.pricing || {};
+  return {
+    input: cost.input,
+    output: cost.output,
+    cached: cost.cache_read ?? cost.cached_input ?? cost.cached,
+    cacheCreation: cost.cache_write ?? cost.cache_creation,
+    reasoning: cost.reasoning,
+  };
+}
+
 function slim(catalog) {
   const out = {};
   for (const [providerId, provider] of Object.entries(catalog)) {
@@ -67,9 +79,19 @@ function slim(catalog) {
     for (const [modelId, model] of Object.entries(provider?.models || {})) {
       models[modelId] = {
         i: (model?.modalities?.input || []).filter((x) => x !== "text"),
+        u: model?.modalities?.output,
         c: model?.limit?.context,
+        n: model?.limit?.input,
         o: model?.limit?.output,
         r: model?.reasoning || undefined,
+        t: model?.tool_call,
+        s: model?.structured_output,
+        p: modelPricing(model),
+        k: model?.canonical_model_id,
+        f: model?.family,
+        x: model?.status,
+        d: model?.release_date,
+        v: model?.last_updated,
       };
     }
     out[providerId] = models;
@@ -152,7 +174,64 @@ export function build(catalog, entries) {
     if (Object.keys(delta).length) (providers[provider] || (providers[provider] = {}))[model] = delta;
   }
 
-  return { models, providers };
+  const reported = {};
+  const canonicalPricing = {};
+  const basenameCanonicalIds = new Map();
+  for (const [providerId, provider] of Object.entries(catalog)) {
+    const records = {};
+    for (const [modelId, model] of Object.entries(provider?.models || {})) {
+      const canonicalModelId = model?.canonical_model_id
+        || (!modelId.includes("/") ? `${providerId}/${modelId}` : null);
+      const pricing = modelPricing(model);
+      records[modelId] = {
+        name: model?.name || modelId,
+        canonicalModelId,
+        family: model?.family,
+        status: model?.status,
+        releaseDate: model?.release_date,
+        lastUpdated: model?.last_updated,
+        openWeights: model?.open_weights,
+        capabilities: {
+          attachment: model?.attachment,
+          reasoning: model?.reasoning,
+          tools: model?.tool_call,
+          structuredOutput: model?.structured_output,
+          temperature: model?.temperature,
+        },
+        modalities: model?.modalities || null,
+        limits: {
+          context: model?.limit?.context,
+          input: model?.limit?.input,
+          output: model?.limit?.output,
+        },
+        pricing,
+      };
+      if (canonicalModelId) {
+        const canonicalProvider = canonicalModelId.split("/")[0];
+        if (canonicalProvider === providerId && Number.isFinite(pricing.input) && Number.isFinite(pricing.output)) {
+          canonicalPricing[canonicalModelId] = pricing;
+        }
+        const basename = baseId(modelId);
+        let ids = basenameCanonicalIds.get(basename);
+        if (!ids) basenameCanonicalIds.set(basename, (ids = new Set()));
+        ids.add(canonicalModelId);
+      }
+    }
+    reported[providerId] = records;
+  }
+  const uniqueCanonicalBasename = {};
+  for (const [basename, ids] of basenameCanonicalIds) {
+    if (ids.size === 1) uniqueCanonicalBasename[basename] = [...ids][0];
+  }
+
+  return {
+    models,
+    providers,
+    providerMap: { ...PROVIDER_ALIASES },
+    reported,
+    canonicalPricing,
+    uniqueCanonicalBasename,
+  };
 }
 
 // Snapshot every registered model with the capabilities the hand-written tables
@@ -204,8 +283,9 @@ export async function syncModelCatalog() {
       const catalog = await response.json();
       const etag = response.headers.get("etag") || null;
       const entries = await collectEntries();
-      const { models, providers } = build(catalog, entries);
-      const serialized = JSON.stringify({ v: CATALOG_VERSION, etag, syncedAt: Date.now(), models, providers });
+      const built = build(catalog, entries);
+      const { models, providers, reported } = built;
+      const serialized = JSON.stringify({ v: CATALOG_VERSION, etag, syncedAt: Date.now(), ...built });
 
       writeAtomic(CATALOG_FILE, serialized);
       writeAtomic(CATALOG_RAW_FILE, JSON.stringify(slim(catalog)));
@@ -217,8 +297,8 @@ export async function syncModelCatalog() {
         status: "updated",
         etag,
         bytes: Buffer.byteLength(serialized),
-        models: Object.keys(models).length,
-        providers: Object.keys(providers).length,
+        models: Object.values(reported).reduce((count, records) => count + Object.keys(records).length, 0),
+        providers: Object.keys(reported).length,
       };
       console.log(`[modelCatalog] ${result.models} models, ${result.providers} providers, ${(result.bytes / 1024).toFixed(1)}KB`);
     }

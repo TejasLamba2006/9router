@@ -1,26 +1,24 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { getDefaultPricing, formatCost } from "open-sse/providers/pricing.js";
+import { getDefaultPricing } from "open-sse/providers/pricing.js";
+import { changePricingField, editableRates } from "@/lib/pricingView.js";
 
 export default function PricingModal({ isOpen, onClose, onSave }) {
   const [pricingData, setPricingData] = useState({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [dirtyPricing, setDirtyPricing] = useState({});
+  const [catalog, setCatalog] = useState(null);
 
-  useEffect(() => {
-    if (isOpen) {
-      loadPricing();
-    }
-  }, [isOpen]);
-
-  const loadPricing = async () => {
-    setLoading(true);
+  async function loadPricing() {
     try {
       const response = await fetch("/api/pricing");
       if (response.ok) {
         const data = await response.json();
-        setPricingData(data);
+        setPricingData(data.pricing || data);
+        setCatalog(data.catalog || null);
+        setDirtyPricing({});
       } else {
         // Fallback to defaults
         const defaults = getDefaultPricing();
@@ -33,19 +31,30 @@ export default function PricingModal({ isOpen, onClose, onSave }) {
     } finally {
       setLoading(false);
     }
-  };
+  }
+
+  useEffect(() => {
+    if (isOpen) {
+      Promise.resolve().then(loadPricing);
+    }
+  }, [isOpen]);
 
   const handlePricingChange = (provider, model, field, value) => {
+    if (value === "") return;
     const numValue = parseFloat(value);
     if (isNaN(numValue) || numValue < 0) return;
 
-    setPricingData(prev => {
-      const newData = { ...prev };
-      if (!newData[provider]) newData[provider] = {};
-      if (!newData[provider][model]) newData[provider][model] = {};
-      newData[provider][model][field] = numValue;
-      return newData;
-    });
+    setPricingData((prev) => changePricingField(prev, provider, model, field, numValue));
+    setDirtyPricing((prev) => ({
+      ...prev,
+      [provider]: {
+        ...(prev[provider] || {}),
+        [model]: {
+          ...(prev[provider]?.[model] || {}),
+          [field]: numValue,
+        },
+      },
+    }));
   };
 
   const handleSave = async () => {
@@ -54,7 +63,7 @@ export default function PricingModal({ isOpen, onClose, onSave }) {
       const response = await fetch("/api/pricing", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(pricingData)
+        body: JSON.stringify(dirtyPricing)
       });
 
       if (response.ok) {
@@ -72,19 +81,26 @@ export default function PricingModal({ isOpen, onClose, onSave }) {
     }
   };
 
-  const handleReset = async () => {
-    if (!confirm("Reset all pricing to defaults? This cannot be undone.")) return;
-
+  async function resetPricing(provider, model) {
+    const query = provider
+      ? `?provider=${encodeURIComponent(provider)}${model ? `&model=${encodeURIComponent(model)}` : ""}`
+      : "";
     try {
-      const response = await fetch("/api/pricing", { method: "DELETE" });
-      if (response.ok) {
-        const defaults = getDefaultPricing();
-        setPricingData(defaults);
-      }
+      const response = await fetch(`/api/pricing${query}`, { method: "DELETE" });
+      if (!response.ok) throw new Error("Reset failed");
+      const data = await response.json();
+      setPricingData(data.pricing || data);
+      setCatalog(data.catalog || null);
+      setDirtyPricing({});
     } catch (error) {
       console.error("Failed to reset pricing:", error);
       alert("Failed to reset pricing");
     }
+  }
+
+  const handleReset = async () => {
+    if (!confirm("Reset all manual pricing overrides? This cannot be undone.")) return;
+    await resetPricing();
   };
 
   if (!isOpen) return null;
@@ -122,6 +138,12 @@ export default function PricingModal({ isOpen, onClose, onSave }) {
                 </p>
               </div>
 
+              {catalog?.syncedAt && (
+                <div className="text-xs text-text-muted">
+                  models.dev updated {new Date(catalog.syncedAt).toLocaleString()}
+                </div>
+              )}
+
               {/* Pricing Tables */}
               {allProviders.map(provider => {
                 const models = Object.keys(pricingData[provider]).sort();
@@ -135,6 +157,7 @@ export default function PricingModal({ isOpen, onClose, onSave }) {
                         <thead className="bg-bg-hover text-text-muted uppercase text-xs">
                           <tr>
                             <th className="px-3 py-2 text-left">Model</th>
+                            <th className="px-3 py-2 text-left">Source</th>
                             <th className="px-3 py-2 text-right">Input</th>
                             <th className="px-3 py-2 text-right">Output</th>
                             <th className="px-3 py-2 text-right">Cached</th>
@@ -143,23 +166,44 @@ export default function PricingModal({ isOpen, onClose, onSave }) {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border">
-                          {models.map(model => (
-                            <tr key={model} className="hover:bg-bg-subtle/50">
-                              <td className="px-3 py-2 font-medium">{model}</td>
-                              {pricingFields.map(field => (
-                                <td key={field} className="px-3 py-2">
-                                  <input
-                                    type="number"
-                                    step="0.01"
-                                    min="0"
-                                    value={pricingData[provider][model][field] || 0}
-                                    onChange={(e) => handlePricingChange(provider, model, field, e.target.value)}
-                                    className="w-20 px-2 py-1 text-right bg-bg-base border border-border rounded focus:outline-none focus:border-primary"
-                                  />
+                          {models.map(model => {
+                            const entry = pricingData[provider][model];
+                            const rates = editableRates(entry);
+                            return (
+                              <tr key={model} className="hover:bg-bg-subtle/50">
+                                <td className="px-3 py-2 font-medium">
+                                  <div className="flex items-center gap-2">
+                                    <span>{model}</span>
+                                    {entry?.source === "manual" && (
+                                      <button
+                                        type="button"
+                                        onClick={() => resetPricing(provider, model)}
+                                        className="text-xs text-primary hover:underline"
+                                      >
+                                        Reset
+                                      </button>
+                                    )}
+                                  </div>
                                 </td>
-                              ))}
-                            </tr>
-                          ))}
+                                <td className="px-3 py-2 text-xs text-text-muted whitespace-nowrap">
+                                  {entry?.source === "models.dev-provider" ? "models.dev" : entry?.source || "unknown"}
+                                </td>
+                                {pricingFields.map(field => (
+                                  <td key={field} className="px-3 py-2">
+                                    <input
+                                      type="number"
+                                      step="0.01"
+                                      min="0"
+                                      placeholder="Unknown"
+                                      value={rates[field] ?? ""}
+                                      onChange={(e) => handlePricingChange(provider, model, field, e.target.value)}
+                                      className="w-24 px-2 py-1 text-right bg-bg-base border border-border rounded focus:outline-none focus:border-primary"
+                                    />
+                                  </td>
+                                ))}
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -196,7 +240,7 @@ export default function PricingModal({ isOpen, onClose, onSave }) {
             <button
               onClick={handleSave}
               className="px-4 py-2 text-sm bg-primary text-white rounded hover:bg-primary/90 transition-colors disabled:opacity-50"
-              disabled={saving}
+              disabled={saving || Object.keys(dirtyPricing).length === 0}
             >
               {saving ? "Saving..." : "Save Changes"}
             </button>

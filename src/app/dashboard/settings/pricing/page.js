@@ -9,30 +9,47 @@ export default function PricingSettingsPage() {
   const router = useRouter();
   const [showModal, setShowModal] = useState(false);
   const [currentPricing, setCurrentPricing] = useState(null);
+  const [catalog, setCatalog] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
 
-  useEffect(() => {
-    loadPricing();
-  }, []);
-
-  const loadPricing = async () => {
+  async function loadPricing() {
     setLoading(true);
     try {
       const response = await fetch("/api/pricing");
       if (response.ok) {
         const data = await response.json();
-        setCurrentPricing(data);
+        setCurrentPricing(data.pricing || data);
+        setCatalog(data.catalog || null);
       }
     } catch (error) {
       console.error("Failed to load pricing:", error);
     } finally {
       setLoading(false);
     }
-  };
+  }
+
+  useEffect(() => {
+    Promise.resolve().then(loadPricing);
+  }, []);
 
   const handlePricingUpdated = () => {
     loadPricing();
   };
+
+  async function syncCatalog() {
+    setSyncing(true);
+    try {
+      const response = await fetch("/api/models/catalog-sync", { method: "POST" });
+      if (!response.ok) throw new Error("Catalog sync failed");
+      await loadPricing();
+    } catch (error) {
+      console.error("Failed to sync model catalog:", error);
+      alert("Failed to sync models.dev catalog");
+    } finally {
+      setSyncing(false);
+    }
+  }
 
   // Count total models with pricing
   const getModelCount = () => {
@@ -60,12 +77,21 @@ export default function PricingSettingsPage() {
             Configure pricing rates for cost tracking and calculations
           </p>
         </div>
-        <button
-          onClick={() => setShowModal(true)}
-          className="px-4 py-2 bg-primary text-white rounded hover:bg-primary/90 transition-colors"
-        >
-          Edit Pricing
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={syncCatalog}
+            disabled={syncing}
+            className="px-4 py-2 border border-border rounded hover:bg-bg-subtle transition-colors disabled:opacity-50"
+          >
+            {syncing ? "Syncing..." : "Sync models.dev"}
+          </button>
+          <button
+            onClick={() => setShowModal(true)}
+            className="px-4 py-2 bg-primary text-white rounded hover:bg-primary/90 transition-colors"
+          >
+            Edit Pricing
+          </button>
+        </div>
       </div>
 
       {/* Quick Stats */}
@@ -88,10 +114,10 @@ export default function PricingSettingsPage() {
         </Card>
         <Card className="p-4">
           <div className="text-text-muted text-sm uppercase font-semibold">
-            Status
+            Catalog
           </div>
-          <div className="text-2xl font-bold mt-1 text-success">
-            {loading ? "..." : "Active"}
+          <div className="text-sm font-semibold mt-1 text-success">
+            {loading ? "..." : catalog?.syncedAt ? new Date(catalog.syncedAt).toLocaleString() : "Not synced"}
           </div>
         </Card>
       </div>
@@ -115,8 +141,8 @@ export default function PricingSettingsPage() {
             <li><strong>Input:</strong> Standard prompt tokens</li>
             <li><strong>Output:</strong> Completion/response tokens</li>
             <li><strong>Cached:</strong> Cached input tokens (typically 50% of input rate)</li>
-            <li><strong>Reasoning:</strong> Special reasoning/thinking tokens (fallback to output rate)</li>
-            <li><strong>Cache Creation:</strong> Tokens used to create cache entries (fallback to input rate)</li>
+            <li><strong>Reasoning:</strong> Special reasoning/thinking tokens; missing rates display as Unknown</li>
+            <li><strong>Cache Creation:</strong> Tokens used to create cache entries; missing rates display as Unknown</li>
           </ul>
           <p>
             <strong>Custom Pricing:</strong> You can override default pricing for specific models.

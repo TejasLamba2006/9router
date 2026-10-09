@@ -1,6 +1,7 @@
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 import { makeKv } from "../helpers/kvStore.js";
+import { normalizePricingRates } from "@/lib/pricingView.js";
 
 const pricingKv = makeKv("pricing");
 const CACHE_TTL_MS = 5000;
@@ -13,6 +14,10 @@ function invalidate() {
 
 async function getUserPricing() {
   return await pricingKv.getAll();
+}
+
+export async function getManualPricing() {
+  return await getUserPricing();
 }
 
 export async function getPricing() {
@@ -48,12 +53,29 @@ export async function getPricing() {
   return merged;
 }
 
-export async function getPricingForModel(provider, model) {
+export async function getPricingForModelWithSource(provider, model) {
   if (!model) return null;
-  const userPricing = await getUserPricing();
-  if (provider && userPricing[provider]?.[model]) return userPricing[provider][model];
-  const { getPricingForModel: resolveConst } = await import("open-sse/providers/pricing.js");
-  return resolveConst(provider, model);
+  const [userPricing, { getCatalogPricing }, { getPricingForModel: resolveConst, isFreeModel }] = await Promise.all([
+    getUserPricing(),
+    import("open-sse/providers/catalogOverride.js"),
+    import("open-sse/providers/pricing.js"),
+  ]);
+  const synced = !isFreeModel(model) ? getCatalogPricing(provider, model) : null;
+  const hardcoded = resolveConst(provider, model);
+  const base = synced
+    ? { rates: synced.rates, source: synced.source, syncedAt: synced.syncedAt }
+    : hardcoded
+      ? { rates: hardcoded, source: "hardcoded", syncedAt: null }
+      : null;
+
+  const manual = provider && userPricing[provider]?.[model];
+  if (!manual) return base;
+  const manualRates = normalizePricingRates({ ...(base?.rates || {}), ...manual });
+  return manualRates ? { rates: manualRates, source: "manual", syncedAt: null } : base;
+}
+
+export async function getPricingForModel(provider, model) {
+  return (await getPricingForModelWithSource(provider, model))?.rates || null;
 }
 
 // Atomic merge inside transaction (per-provider read-modify-write)
@@ -65,7 +87,7 @@ export async function updatePricing(pricingData) {
       const current = row ? (parseJson(row.value, {}) || {}) : {};
       const merged = { ...current };
       for (const [model, pricing] of Object.entries(models)) {
-        merged[model] = pricing;
+        merged[model] = { ...(current[model] || {}), ...pricing };
       }
       db.run(
         `INSERT INTO kv(scope, key, value) VALUES('pricing', ?, ?) ON CONFLICT(scope, key) DO UPDATE SET value = excluded.value`,

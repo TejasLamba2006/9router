@@ -11,8 +11,8 @@ export async function GET() {
     const parsed = JSON.parse(fs.readFileSync(CATALOG_FILE, "utf8"));
     catalog = {
       syncedAt: parsed.syncedAt,
-      models: Object.keys(parsed.models || {}).length,
-      providers: Object.keys(parsed.providers || {}).length,
+      models: Object.values(parsed.reported || {}).reduce((count, models) => count + Object.keys(models).length, 0),
+      providers: Object.keys(parsed.reported || {}).length,
       bytes: fs.statSync(CATALOG_FILE).size,
     };
   } catch {

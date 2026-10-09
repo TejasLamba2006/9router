@@ -169,11 +169,12 @@ describe("catalog schema", () => {
     }
     expect(sent[0]["if-none-match"]).toBeUndefined();
     const written = JSON.parse(fs.readFileSync(catalogFile, "utf8"));
-    expect(written.v).toBe(2);
+    expect(written.v).toBe(3);
     expect(written.models["glm:glm-4.6v"]).toEqual({ vision: true });
   });
 
-  it("asks upstream for a 304 once the file is current", async () => {
+  it("asks upstream for a 304 once the file is current and preserves the snapshot", async () => {
+    const before = fs.readFileSync(catalogFile, "utf8");
     const sent = [];
     const realFetch = globalThis.fetch;
     globalThis.fetch = async (_url, options) => {
@@ -186,5 +187,18 @@ describe("catalog schema", () => {
       globalThis.fetch = realFetch;
     }
     expect(sent[0]["if-none-match"]).toBe('W/"new"');
+    expect(fs.readFileSync(catalogFile, "utf8")).toBe(before);
+  });
+
+  it("preserves the current snapshot when sync fails", async () => {
+    const before = fs.readFileSync(catalogFile, "utf8");
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({ ok: false, status: 503, headers: new Map() });
+    try {
+      expect(await syncModelCatalog()).toBeNull();
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+    expect(fs.readFileSync(catalogFile, "utf8")).toBe(before);
   });
 });

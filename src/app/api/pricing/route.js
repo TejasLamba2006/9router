@@ -1,15 +1,29 @@
 import { NextResponse } from "next/server";
-import { getPricing, updatePricing, resetPricing, resetAllPricing } from "@/lib/localDb.js";
-import { getDefaultPricing } from "open-sse/providers/pricing.js";
+import { getManualPricing, getPricingForModelWithSource, updatePricing, resetPricing, resetAllPricing } from "@/lib/localDb.js";
+import { PROVIDER_PRICING, getDefaultPricing } from "open-sse/providers/pricing.js";
+import { getCatalogRevision, getCatalogSnapshot } from "open-sse/providers/catalogOverride.js";
+import { buildPricingView } from "@/lib/pricingView.js";
+
+async function getPricingView() {
+  const manual = await getManualPricing();
+  const catalog = getCatalogSnapshot();
+  const view = buildPricingView({ hardcoded: PROVIDER_PRICING, manual, catalog });
+  return { ...view, catalog: getCatalogRevision() };
+}
 
 /**
  * GET /api/pricing
  * Get current pricing configuration (merged user + defaults)
  */
-export async function GET() {
+export async function GET(request) {
   try {
-    const pricing = await getPricing();
-    return NextResponse.json(pricing);
+    const { searchParams } = new URL(request.url);
+    const provider = searchParams.get("provider");
+    const model = searchParams.get("model");
+    if (provider && model) {
+      return NextResponse.json(await getPricingForModelWithSource(provider, model));
+    }
+    return NextResponse.json(await getPricingView());
   } catch (error) {
     console.error("Error fetching pricing:", error);
     return NextResponse.json(
@@ -105,8 +119,7 @@ export async function DELETE(request) {
       await resetAllPricing();
     }
 
-    const pricing = await getPricing();
-    return NextResponse.json(pricing);
+    return NextResponse.json(await getPricingView());
   } catch (error) {
     console.error("Error resetting pricing:", error);
     return NextResponse.json(
