@@ -216,4 +216,32 @@ describe("Claude extra-usage credits", () => {
       },
     ]);
   });
+
+  it("shows a zero balance when Claude reports that prior credits ran out", () => {
+    const quotas = parseQuotaData("claude", {
+      quotas: {},
+      extraUsage: {
+        is_enabled: false,
+        monthly_limit: null,
+        used_credits: null,
+        utilization: null,
+        currency: "USD",
+        disabled_reason: "out_of_credits",
+        credits_ever_enabled: true,
+      },
+    });
+
+    expect(quotas).toEqual([
+      {
+        name: "extra usage",
+        used: 0,
+        total: 0,
+        creditBalance: 0,
+        remainingPercentage: 0,
+        resetAt: null,
+        isCreditBalance: true,
+        currency: "USD",
+      },
+    ]);
+  });
 });

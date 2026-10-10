@@ -597,19 +597,27 @@ export function parseQuotaData(provider, data) {
               resetAt: quota.resetAt || null,
             });
           });
-          if (data.extraUsage?.is_enabled) {
-            const monthlyLimit = Number(data.extraUsage.monthly_limit) || 0;
-            const usedCredits = Number(data.extraUsage.used_credits) || 0;
-            const utilization = Number(data.extraUsage.utilization) || 0;
+          const extraUsage = data.extraUsage;
+          if (
+            extraUsage?.is_enabled
+            || (extraUsage?.credits_ever_enabled && extraUsage?.disabled_reason === "out_of_credits")
+          ) {
+            const monthlyLimit = Number(extraUsage.monthly_limit) || 0;
+            const usedCredits = Number(extraUsage.used_credits) || 0;
+            const utilization = Number(extraUsage.utilization);
+            const isOutOfCredits = extraUsage.is_enabled === false
+              && extraUsage.disabled_reason === "out_of_credits";
             normalizedQuotas.push({
               name: "extra usage",
               used: usedCredits,
               total: monthlyLimit,
-              creditBalance: Math.max(0, monthlyLimit - usedCredits),
-              remainingPercentage: Math.max(0, 100 - utilization),
+              creditBalance: isOutOfCredits ? 0 : Math.max(0, monthlyLimit - usedCredits),
+              remainingPercentage: isOutOfCredits
+                ? 0
+                : Math.max(0, 100 - (Number.isFinite(utilization) ? utilization : 0)),
               resetAt: null,
               isCreditBalance: true,
-              currency: data.extraUsage.currency || "USD",
+              currency: extraUsage.currency || "USD",
             });
           }
         }
