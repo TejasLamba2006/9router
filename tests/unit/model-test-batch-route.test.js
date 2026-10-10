@@ -14,6 +14,7 @@ vi.mock("@/lib/localDb", () => ({
     { providerAlias: "openai", id: "b", type: "llm" },
     { providerAlias: "openai", id: "hidden", type: "llm" },
     { providerAlias: "openai", id: "gone", type: "llm" },
+    { providerAlias: "cx", id: "custom-codex", type: "llm" },
   ],
 }));
 vi.mock("@/shared/constants/models", () => ({ getModelsByProviderId: () => [] }));
@@ -21,6 +22,7 @@ vi.mock("@/lib/modelProbe", () => ({ runModelProbe: mocks.probe }));
 vi.mock("@/lib/modelCapabilityProbe", () => ({ runModelCapabilityProbeGroup: mocks.capabilityGroup }));
 vi.mock("@/sse/services/modelVisibility", () => ({
   getDisabledModelIds: async () => fx.hidden,
+  resolveVisibilityKeys: async (provider) => new Set(provider === "codex" ? ["codex", "cx"] : [provider]),
   disableCanonicalModels: mocks.disable,
 }));
 
@@ -59,6 +61,13 @@ describe("model test batch route", () => {
     expect(mocks.probe.mock.calls.map(([arg]) => [arg.model, arg.connectionId])).toEqual([["a", "conn-a"], ["b", "conn-a"]]);
     expect(events[0]).toMatchObject({ type: "start", total: 2, skippedHidden: 1 });
     expect(events.at(-1)).toMatchObject({ type: "done", done: 2 });
+  });
+
+  it("accepts native custom models stored under the provider alias", async () => {
+    fx.connection = { id: "conn-a", provider: "codex", isActive: true };
+    const { response } = await run({ providerId: "codex", connectionId: "conn-a", modelIds: ["custom-codex"], cooldownMs: 0 });
+    expect(response.status).toBe(200);
+    expect(mocks.probe).toHaveBeenCalledWith(expect.objectContaining({ provider: "codex", model: "custom-codex", connectionId: "conn-a" }));
   });
 
   it("rejects mismatched connections and invalid cooldowns", async () => {

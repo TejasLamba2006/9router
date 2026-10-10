@@ -17,7 +17,7 @@ const CLASSIFICATION_LABELS = {
   inconclusive: "Inconclusive",
 };
 
-export default function ModelBatchToolbar({ batch, shownIds }) {
+export default function ModelBatchToolbar({ batch, shownIds, embedded = false }) {
   const [hideMenuOpen, setHideMenuOpen] = useState(false);
   const hideMenuRef = useRef(null);
   const hasRiskySelection = batch.autoHideClassifications.some((value) => !DEFAULT_AUTO_HIDE_CLASSIFICATIONS.includes(value));
@@ -41,15 +41,18 @@ export default function ModelBatchToolbar({ batch, shownIds }) {
       : [...previous, classification]);
   };
 
-  if (batch.activeConnections.length === 0) return null;
+  const hasConnection = batch.activeConnections.length > 0;
   return (
-    <div className="flex w-full flex-wrap items-center gap-2 rounded-lg border border-border p-2 text-xs">
+    <div className={`flex flex-wrap items-center gap-2 text-xs ${embedded ? "contents" : "w-full rounded-lg border border-border p-2"}`}>
       <select
         value={batch.connectionId || batch.activeConnections[0]?.id || ""}
         onChange={(event) => batch.setConnectionId(event.target.value)}
         aria-label="Probe connection"
-        className="rounded border border-border bg-background px-2 py-1.5"
+        disabled={!hasConnection || batch.state?.running}
+        title={hasConnection ? "Selected account for model tests" : "Active connection required"}
+        className="rounded border border-border bg-sidebar/50 px-2 py-1.5 disabled:opacity-50"
       >
+        {!hasConnection && <option value="">Active connection required</option>}
         {batch.activeConnections.map((connection) => (
           <option key={connection.id} value={connection.id}>{connection.name || connection.email || connection.id}</option>
         ))}
@@ -108,11 +111,11 @@ export default function ModelBatchToolbar({ batch, shownIds }) {
         <input type="checkbox" checked={batch.verifyCapabilities} onChange={(event) => batch.setVerifyCapabilities(event.target.checked)} />
         Verify capabilities
       </label>
-      <Button size="sm" variant="secondary" icon="science" onClick={() => batch.run(batch.selectedIds)} disabled={batch.selectedIds.length === 0 || batch.state?.running}>
+      <Button size="sm" variant="secondary" icon="science" onClick={() => batch.run(batch.selectedIds)} disabled={!hasConnection || batch.selectedIds.length === 0 || batch.state?.running} title={!hasConnection ? "Active connection required" : "Test selected models"}>
         Test selected ({batch.selectedIds.length})
       </Button>
-      <Button size="sm" variant="secondary" icon="playlist_play" onClick={() => batch.run(shownIds)} disabled={shownIds.length === 0 || batch.state?.running}>
-        Test shown ({shownIds.length})
+      <Button size="sm" variant="secondary" icon={batch.state?.running ? "progress_activity" : "playlist_play"} onClick={() => batch.run(shownIds)} disabled={!hasConnection || shownIds.length === 0 || batch.state?.running} title={!hasConnection ? "Active connection required" : "Test all filtered visible models"}>
+        {batch.state?.running ? `Testing ${batch.state.done}/${batch.state.total}` : `Test all (${shownIds.length})`}
       </Button>
       {batch.state?.running && (
         <Button size="sm" variant="ghost" icon="stop" onClick={batch.cancel}>Cancel</Button>
@@ -143,4 +146,5 @@ ModelBatchToolbar.propTypes = {
     cancel: PropTypes.func.isRequired,
   }).isRequired,
   shownIds: PropTypes.arrayOf(PropTypes.string).isRequired,
+  embedded: PropTypes.bool,
 };

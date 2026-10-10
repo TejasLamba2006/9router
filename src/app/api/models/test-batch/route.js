@@ -3,7 +3,7 @@ import { runModelCapabilityProbeGroup } from "@/lib/modelCapabilityProbe";
 import { getModelsByProviderId } from "@/shared/constants/models";
 import { runModelProbe } from "@/lib/modelProbe";
 import { AUTO_HIDE_CLASSIFICATIONS, DEFAULT_AUTO_HIDE_CLASSIFICATIONS, runModelTestBatch } from "@/lib/modelTestBatch";
-import { disableCanonicalModels, getDisabledModelIds } from "@/sse/services/modelVisibility";
+import { disableCanonicalModels, getDisabledModelIds, resolveVisibilityKeys } from "@/sse/services/modelVisibility";
 
 const activeConnections = new Set();
 const MAX_MODELS = 1000;
@@ -64,14 +64,15 @@ export async function POST(request) {
 
   let modelIds;
   try {
-    const [hiddenIds, customModels] = await Promise.all([
+    const [hiddenIds, customModels, providerKeys] = await Promise.all([
       getDisabledModelIds(providerId),
       getCustomModels(),
+      resolveVisibilityKeys(providerId),
     ]);
     const hidden = new Set(hiddenIds);
     const inventory = new Set([
       ...getModelsByProviderId(providerId).filter((item) => !item.kind || item.kind === "llm").map((item) => item.id),
-      ...customModels.filter((item) => item.providerAlias === providerId && (item.type || item.kind || "llm") === "llm").map((item) => item.id),
+      ...customModels.filter((item) => providerKeys.has(item.providerAlias) && (item.type || item.kind || "llm") === "llm").map((item) => item.id),
     ]);
     modelIds = [...new Set(body.modelIds.map((id) => id.trim()))]
       .filter((id) => inventory.has(id) && !hidden.has(id));

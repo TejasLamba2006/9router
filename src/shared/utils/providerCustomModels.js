@@ -29,6 +29,8 @@ export function getProviderCustomModelRows({
       fullModel,
       source: "custom",
       type: rowType,
+      ...(model.source ? { catalogSource: model.source } : {}),
+      ...(typeof model.isFree === "boolean" ? { isFree: model.isFree } : {}),
     });
   }
 

@@ -15,6 +15,7 @@ import { translate } from "@/i18n/runtime";
 import { fetchSuggestedModels } from "@/shared/utils/providerModelsFetcher";
 import { getProviderCustomModelRows } from "@/shared/utils/providerCustomModels";
 import { filterModelRows } from "@/shared/utils/modelVisibility";
+import { filterAndSortModelRows } from "@/shared/utils/modelToolbar";
 import ModelVisibilityToolbar from "./ModelVisibilityToolbar";
 import ModelBatchToolbar from "./ModelBatchToolbar";
 import useModelBatchTest from "./useModelBatchTest";
@@ -79,6 +80,8 @@ export default function ProviderDetailPage() {
   const [disabledModelIds, setDisabledModelIds] = useState([]);
   const [modelQuery, setModelQuery] = useState("");
   const [modelVisibility, setModelVisibility] = useState("all");
+  const [modelFreeFilter, setModelFreeFilter] = useState("all");
+  const [sortFreeFirst, setSortFreeFirst] = useState(false);
   const [confirmState, setConfirmState] = useState(null);
   const [showAgRiskModal, setShowAgRiskModal] = useState(false);
   const [oneByOneRunning, setOneByOneRunning] = useState(false);
@@ -1157,11 +1160,15 @@ export default function ProviderDetailPage() {
       builtInModels: models,
       type: "llm",
     });
+    const providerIsFreeTier = Boolean(FREE_PROVIDERS[providerId] || FREE_TIER_PROVIDERS[providerId]);
     const rows = [
-      ...customModelRows.map((model) => ({ ...model, name: model.name || model.id })),
-      ...allModels.map((model) => ({ ...model, fullModel: `${providerDisplayAlias}/${model.id}` })),
+      ...customModelRows.map((model) => ({ ...model, name: model.name || model.id, isFree: model.isFree ?? providerIsFreeTier })),
+      ...allModels.map((model) => ({ ...model, isFree: model.isFree ?? providerIsFreeTier, source: model.source || "system", fullModel: `${providerDisplayAlias}/${model.id}` })),
     ];
-    const shownRows = filterModelRows(rows, { query: modelQuery, visibility: modelVisibility, disabledIds: disabledModelIds });
+    const shownRows = filterAndSortModelRows(
+      filterModelRows(rows, { query: modelQuery, visibility: modelVisibility, disabledIds: disabledModelIds }),
+      { freeFilter: modelFreeFilter, sortFreeFirst }
+    );
     const visibleShownIds = shownRows.filter((model) => !disabledSet.has(model.id)).map((model) => model.id);
     const counts = {
       all: rows.length,
@@ -1177,14 +1184,18 @@ export default function ProviderDetailPage() {
           onQueryChange={setModelQuery}
           visibility={modelVisibility}
           onVisibilityChange={setModelVisibility}
+          freeFilter={modelFreeFilter}
+          onFreeFilterChange={setModelFreeFilter}
+          sortFreeFirst={sortFreeFirst}
+          onSortFreeFirstChange={setSortFreeFirst}
           counts={counts}
           shownIds={shownRows.map((model) => model.id)}
           onHideShown={handleDisableAll}
           onUnhideShown={async (ids) => {
             for (const id of ids) await handleEnableModel(id);
           }}
+          batchControls={supportsStrictModelTests ? <ModelBatchToolbar batch={modelBatch} shownIds={visibleShownIds} embedded /> : null}
         />
-        {supportsStrictModelTests && <ModelBatchToolbar batch={modelBatch} shownIds={visibleShownIds} />}
 
         {shownRows.map((model) => {
           if (model.source) {
@@ -1192,10 +1203,11 @@ export default function ProviderDetailPage() {
             return (
               <ModelRow
                 key={`${model.source}-${model.fullModel}`}
-                model={{ id: model.id, name: model.name }}
+                model={{ id: model.id, name: model.name, source: model.source, isFree: model.isFree }}
                 fullModel={`${providerDisplayAlias}/${model.id}`}
                 alias={model.alias}
                 copied={copied}
+                onSetAlias={(alias) => handleSetAlias(model.id, alias, providerStorageAlias)}
                 onCopy={copy}
                 onDeleteAlias={() => {
                   if (model.source === "custom") handleDeleteCustomModel(model.id, "llm", providerStorageAlias);
@@ -1203,6 +1215,7 @@ export default function ProviderDetailPage() {
                 }}
                 testStatus={modelBatch.results[model.id]?.ok === true ? "ok" : modelBatch.results[model.id] ? "error" : undefined}
                 onTest={!hidden && supportsStrictModelTests && modelBatch.activeConnections.length > 0 ? () => modelBatch.run([model.id]) : undefined}
+                testDisabledReason={hidden ? "Unhide model before testing" : !supportsStrictModelTests ? "Selected-account testing unavailable for this provider" : modelBatch.activeConnections.length === 0 ? "Active connection required" : undefined}
                 isTesting={modelBatch.state?.running && modelBatch.state.current === model.id && !modelBatch.results[model.id]}
                 isCustom
                 isFree={false}
@@ -1227,7 +1240,7 @@ export default function ProviderDetailPage() {
           return (
             <ModelRow
               key={model.id}
-              model={model}
+              model={{ ...model, source: model.source || "system" }}
               fullModel={`${providerDisplayAlias}/${model.id}`}
               alias={existingAlias}
               copied={copied}
@@ -1236,6 +1249,7 @@ export default function ProviderDetailPage() {
               onDeleteAlias={() => handleDeleteAlias(existingAlias)}
               testStatus={modelBatch.results[model.id]?.ok === true ? "ok" : modelBatch.results[model.id] ? "error" : undefined}
               onTest={!hidden && supportsStrictModelTests && modelBatch.activeConnections.length > 0 ? () => modelBatch.run([model.id]) : undefined}
+              testDisabledReason={hidden ? "Unhide model before testing" : !supportsStrictModelTests ? "Selected-account testing unavailable for this provider" : modelBatch.activeConnections.length === 0 ? "Active connection required" : undefined}
               isTesting={modelBatch.state?.running && modelBatch.state.current === model.id && !modelBatch.results[model.id]}
               isFree={model.isFree}
               onDisable={() => handleDisableModel(model.id)}
