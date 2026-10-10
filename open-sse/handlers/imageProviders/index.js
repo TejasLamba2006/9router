@@ -1,5 +1,7 @@
 // Image provider adapter registry
 import createOpenAIAdapter from "./openai.js";
+import createOpenAICompatibleNodeImageAdapter from "./openaiCompatNode.js";
+import { isOpenAICompatibleNode } from "../customMediaNode.js";
 import gemini from "./gemini.js";
 import codex from "./codex.js";
 import sdwebui from "./sdwebui.js";
@@ -35,9 +37,11 @@ const ADAPTERS = {
 };
 
 export function getImageAdapter(provider) {
-  return ADAPTERS[provider] || null;
+  if (ADAPTERS[provider]) return ADAPTERS[provider];
+  if (isOpenAICompatibleNode(provider)) return createOpenAICompatibleNodeImageAdapter(provider);
+  return null;
 }
 
 export function isImageProvider(provider) {
-  return provider in ADAPTERS;
+  return provider in ADAPTERS || isOpenAICompatibleNode(provider);
 }

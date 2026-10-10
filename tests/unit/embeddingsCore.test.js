@@ -267,16 +267,17 @@ describe("buildEmbeddingsUrl", () => {
     expect(url).toBe("https://myhost.ai/v1/embeddings");
   });
 
-  it("openai-compatible-* without baseUrl → falls back to api.openai.com", async () => {
+  it("openai-compatible-* without baseUrl fails closed", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(makeProviderResponse(VALID_EMBEDDING_RESPONSE));
 
-    await handleEmbeddingsCore(makeOptions({
+    const result = await handleEmbeddingsCore(makeOptions({
       modelInfo: { provider: "openai-compatible-fallback", model: "embed" },
-      credentials: { apiKey: "sk-x", providerSpecificData: {} },
+      credentials: { apiKey: "sk-x", providerSpecificData: { serviceKinds: ["embedding"] } },
     }));
 
-    const [url] = vi.mocked(fetch).mock.calls[0];
-    expect(url).toBe("https://api.openai.com/v1/embeddings");
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/base URL/i);
   });
 
   it("unsupported provider (e.g. gemini-cli) → 400 error, no fetch called", async () => {

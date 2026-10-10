@@ -15,17 +15,14 @@ const ADAPTERS = {
   gemini,
   google_ai_studio: gemini,
   // Self-hosted reads creds.providerSpecificData.baseUrl (one provider, many
-  // servers) — but via its OWN adapter, not openaiCompatNode: that one falls back
-  // to api.openai.com when no baseUrl is set, which under a provider called
-  // "Self-hosted Embedding" means silently shipping the input and API key to
-  // OpenAI. selfhostedEmbedding refuses instead.
+  // servers) and refuses to send input anywhere when the endpoint is missing.
   "selfhosted-embedding": selfhostedEmbedding,
 };
 
 export function getEmbeddingAdapter(provider) {
   if (ADAPTERS[provider]) return ADAPTERS[provider];
   if (provider?.startsWith?.("openai-compatible-") || provider?.startsWith?.("custom-embedding-")) {
-    return openaiCompatNode;
+    return openaiCompatNode(provider);
   }
   return null;
 }

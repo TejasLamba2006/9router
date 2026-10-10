@@ -251,6 +251,18 @@ function jsonResponse(obj) {
   };
 }
 
+export function customNodeSttConfig(provider, credentials) {
+  if (!provider?.startsWith?.("openai-compatible-")) return null;
+  const kinds = credentials?.providerSpecificData?.serviceKinds;
+  if (!Array.isArray(kinds) || !kinds.includes("stt")) {
+    throw new Error(`Custom provider '${provider}' is not enabled for stt`);
+  }
+  const raw = credentials?.providerSpecificData?.baseUrl;
+  if (!raw || !String(raw).trim()) throw new Error(`Custom provider '${provider}' needs a base URL for stt`);
+  const base = String(raw).trim().replace(/\/+$/, "").replace(/\/audio\/transcriptions$/, "");
+  return { authType: "apikey", baseUrl: `${base}/audio/transcriptions`, format: "openai" };
+}
+
 // Model-level transport marker (registry models[].transport, e.g. the Gemini
 // live STT entry's "gemini-live", or a custom model's stored transport).
 // Dispatch reads the marker — never a hardcoded model id — so new realtime

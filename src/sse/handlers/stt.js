@@ -6,7 +6,7 @@ import { getSettings, getCustomModels } from "@/lib/localDb";
 import { getModelInfo } from "../services/model.js";
 import { getKeyAccessContext, enforceKeyAccessResolved } from "../services/keyAccess.js";
 import { enforceModelEnabled } from "../services/modelVisibility.js";
-import { handleSttCore } from "open-sse/handlers/sttCore.js";
+import { customNodeSttConfig, handleSttCore } from "open-sse/handlers/sttCore.js";
 import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import { AI_PROVIDERS } from "@/shared/constants/providers";
@@ -100,7 +100,13 @@ export async function handleStt(request) {
 
     log.info("AUTH", `\x1b[32mUsing ${provider} account: ${credentials.connectionName}\x1b[0m`);
 
-    const result = await handleSttCore({ provider, model, formData, credentials, sttConfig: AI_PROVIDERS[provider]?.sttConfig, transport: modelTransport });
+    let sttConfig;
+    try {
+      sttConfig = customNodeSttConfig(provider, credentials) || AI_PROVIDERS[provider]?.sttConfig;
+    } catch (error) {
+      return errorResponse(HTTP_STATUS.BAD_REQUEST, error.message);
+    }
+    const result = await handleSttCore({ provider, model, formData, credentials, sttConfig, transport: modelTransport });
 
     if (result.success) return result.response;
 

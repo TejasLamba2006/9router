@@ -14,7 +14,15 @@ const VIDEO_FETCH_TIMEOUT_MS = Number(process.env.VIDEO_FETCH_TIMEOUT_MS || 1200
 // which upstream rejects before job creation).
 export const VIDEO_ACTIONS = new Set(["generations", "edits", "extensions"]);
 
-export function getVideoConfig(provider) {
+export function getVideoConfig(provider, credentials = null) {
+  if (provider?.startsWith?.("openai-compatible-")) {
+    const kinds = credentials?.providerSpecificData?.serviceKinds;
+    if (!Array.isArray(kinds) || !kinds.includes("video")) return null;
+    const raw = credentials?.providerSpecificData?.baseUrl;
+    if (!raw || !String(raw).trim()) return null;
+    const base = String(raw).trim().replace(/\/+$/, "").replace(/\/videos$/, "");
+    return { baseUrl: `${base}/videos` };
+  }
   return PROVIDER_MEDIA[provider]?.videoConfig || null;
 }
 
@@ -87,7 +95,7 @@ export async function handleVideoProxyCore({
   log,
   onCredentialsRefreshed,
 }) {
-  const config = getVideoConfig(provider);
+  const config = getVideoConfig(provider, credentials);
   if (!config) {
     return createErrorResult(HTTP_STATUS.BAD_REQUEST, `Provider '${provider}' does not support video generation`);
   }

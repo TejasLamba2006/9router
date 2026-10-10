@@ -1,12 +1,6 @@
-// Self-hosted embeddings — like openaiCompatNode, but the baseUrl is REQUIRED.
+// Self-hosted embeddings — baseUrl is REQUIRED, as it is for every custom node.
 //
-// openaiCompatNode falls back to https://api.openai.com/v1 when a connection
-// carries no providerSpecificData.baseUrl. For a custom NODE that default is
-// defensible: the node was created by pointing at some OpenAI-compatible URL, and
-// OpenAI is the archetype. For a provider whose entire purpose is "my own
-// server", it is actively harmful — a connection saved without a baseUrl sends
-// the INPUT TEXT and the API KEY to OpenAI, silently, under a provider named
-// "Self-hosted Embedding".
+// A missing endpoint must never send input text and an API key to OpenAI.
 //
 // Observed exactly that with a placeholder connection (2026-08-04):
 //

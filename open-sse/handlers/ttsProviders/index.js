@@ -8,6 +8,8 @@ import openrouter from "./openrouter.js";
 import gemini, { fetchGeminiVoices } from "./gemini.js";
 import xiaomiMimo from "./xiaomi-mimo.js";
 import selfhostedTts from "./selfhostedTts.js";
+import createOpenAICompatibleNodeTtsAdapter from "./openaiCompatNode.js";
+import { isOpenAICompatibleNode } from "../customMediaNode.js";
 import { FORMAT_HANDLERS } from "./genericFormats.js";
 import { parseModelVoice } from "./_base.js";
 
@@ -25,7 +27,9 @@ const SPECIAL_ADAPTERS = {
 };
 
 export function getTtsAdapter(provider) {
-  return SPECIAL_ADAPTERS[provider] || null;
+  if (SPECIAL_ADAPTERS[provider]) return SPECIAL_ADAPTERS[provider];
+  if (isOpenAICompatibleNode(provider)) return createOpenAICompatibleNodeTtsAdapter(provider);
+  return null;
 }
 
 // Generic config-driven dispatcher (uses ttsConfig.format)
