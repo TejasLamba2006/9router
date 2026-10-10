@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
-import { getManualPricing, getPricingForModelWithSource, updatePricing, resetPricing, resetAllPricing } from "@/lib/localDb.js";
+import { getManualPricing, getPricingForModelWithSource, getPricingForModelsWithSource, updatePricing, resetPricing, resetAllPricing } from "@/lib/localDb.js";
 import { PROVIDER_PRICING, getDefaultPricing } from "open-sse/providers/pricing.js";
 import { getCatalogRevision, getCatalogSnapshot } from "open-sse/providers/catalogOverride.js";
 import { buildPricingView } from "@/lib/pricingView.js";
+
+const MAX_MODEL_BATCH = 1000;
 
 async function getPricingView() {
   const manual = await getManualPricing();
@@ -20,6 +22,13 @@ export async function GET(request) {
     const { searchParams } = new URL(request.url);
     const provider = searchParams.get("provider");
     const model = searchParams.get("model");
+    const models = searchParams.getAll("models");
+    if (provider && models.length) {
+      if (models.length > MAX_MODEL_BATCH) {
+        return NextResponse.json({ error: `At most ${MAX_MODEL_BATCH} models per request` }, { status: 400 });
+      }
+      return NextResponse.json(await getPricingForModelsWithSource(provider, models));
+    }
     if (provider && model) {
       return NextResponse.json(await getPricingForModelWithSource(provider, model));
     }

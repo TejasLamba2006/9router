@@ -9,6 +9,7 @@ import { filterAndSortModelRows } from "@/shared/utils/modelToolbar";
 import ModelVisibilityToolbar from "./ModelVisibilityToolbar";
 import ModelBatchToolbar from "./ModelBatchToolbar";
 import ModelRow from "./ModelRow";
+import useModelPricing from "./useModelPricing";
 import useModelBatchTest from "./useModelBatchTest";
 
 export default function CompatibleModelsSection({
@@ -47,6 +48,7 @@ export default function CompatibleModelsSection({
     providerAlias: providerStorageAlias,
     type: "llm",
   });
+  const modelPricing = useModelPricing(providerStorageAlias, allModels.map((model) => model.id));
   const disabledSet = new Set(disabledModelIds);
   const shownModels = filterAndSortModelRows(
     filterModelRows(allModels, { query, visibility, disabledIds: disabledModelIds }),
@@ -143,6 +145,9 @@ export default function CompatibleModelsSection({
                   onToggleSelected={!hidden ? () => batch.toggleSelected(model.id) : undefined}
                   batchResult={batch.results[model.id]}
                   capabilityEvidence={batch.capabilityEvidence[model.id]}
+                  pricing={modelPricing.pricing[model.id]}
+                  onSavePricing={(rates) => modelPricing.save(model.id, rates)}
+                  onResetPricing={() => modelPricing.reset(model.id).catch((error) => alert(error.message))}
                 />
               );
             })}

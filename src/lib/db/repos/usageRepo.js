@@ -2,6 +2,7 @@ import { EventEmitter } from "events";
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 import { getMeta, setMeta } from "../helpers/metaStore.js";
+import { calculateCostFromTokens } from "open-sse/providers/pricing.js";
 
 function maskApiKey(key) {
   if (!key || typeof key !== "string") return null;
@@ -51,6 +52,20 @@ function getLocalDateKey(timestamp) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+export function pricingPairKey(provider, model) {
+  return `${provider}\0${model}`;
+}
+
+function dayBucketKeys(entry) {
+  return {
+    byProvider: entry.provider || null,
+    byModel: entry.provider ? `${entry.model}|${entry.provider}` : entry.model,
+    byAccount: entry.connectionId || null,
+    byApiKey: `${entry.apiKey && typeof entry.apiKey === "string" ? entry.apiKey : "local-no-key"}|${entry.model}|${entry.provider || "unknown"}`,
+    byEndpoint: `${entry.endpoint || "Unknown"}|${entry.model}|${entry.provider || "unknown"}`,
+  };
+}
+
 function addToCounter(target, key, values) {
   if (!target[key]) target[key] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 };
   target[key].requests += values.requests || 1;
@@ -80,22 +95,49 @@ function aggregateEntryToDay(day, entry) {
   day.byApiKey ||= {};
   day.byEndpoint ||= {};
 
-  if (entry.provider) addToCounter(day.byProvider, entry.provider, vals);
+  const keys = dayBucketKeys(entry);
+  if (keys.byProvider) addToCounter(day.byProvider, keys.byProvider, vals);
+  addToCounter(day.byModel, keys.byModel, { ...vals, meta: { rawModel: entry.model, provider: entry.provider } });
+  if (keys.byAccount) {
+    addToCounter(day.byAccount, keys.byAccount, { ...vals, meta: { rawModel: entry.model, provider: entry.provider } });
+  }
+  addToCounter(day.byApiKey, keys.byApiKey, { ...vals, meta: { rawModel: entry.model, provider: entry.provider, apiKey: entry.apiKey || null } });
+  addToCounter(day.byEndpoint, keys.byEndpoint, { ...vals, meta: { endpoint: entry.endpoint || "Unknown", rawModel: entry.model, provider: entry.provider } });
+}
 
-  const modelKey = entry.provider ? `${entry.model}|${entry.provider}` : entry.model;
-  addToCounter(day.byModel, modelKey, { ...vals, meta: { rawModel: entry.model, provider: entry.provider } });
-
-  if (entry.connectionId) {
-    addToCounter(day.byAccount, entry.connectionId, { ...vals, meta: { rawModel: entry.model, provider: entry.provider } });
+// Daily-only legacy rows (no history) keep their stored cost.
+export function repriceUsageSync(db, resolvedRatesByPair) {
+  const dayDeltas = new Map();
+  for (const [pair, rates] of resolvedRatesByPair) {
+    const [provider, model] = pair.split("\0");
+    const rows = db.all(
+      `SELECT id, timestamp, provider, model, connectionId, apiKey, endpoint, cost, tokens FROM usageHistory WHERE provider = ? AND model = ?`,
+      [provider, model]
+    );
+    for (const row of rows) {
+      const cost = rates ? calculateCostFromTokens(parseJson(row.tokens, {}) || {}, rates) : 0;
+      const delta = cost - (row.cost || 0);
+      if (delta === 0) continue;
+      db.run(`UPDATE usageHistory SET cost = ? WHERE id = ?`, [cost, row.id]);
+      const dateKey = getLocalDateKey(row.timestamp);
+      if (!dayDeltas.has(dateKey)) dayDeltas.set(dateKey, []);
+      dayDeltas.get(dateKey).push([row, delta]);
+    }
   }
 
-  const apiKeyVal = entry.apiKey && typeof entry.apiKey === "string" ? entry.apiKey : "local-no-key";
-  const akModelKey = `${apiKeyVal}|${entry.model}|${entry.provider || "unknown"}`;
-  addToCounter(day.byApiKey, akModelKey, { ...vals, meta: { rawModel: entry.model, provider: entry.provider, apiKey: entry.apiKey || null } });
-
-  const endpoint = entry.endpoint || "Unknown";
-  const epKey = `${endpoint}|${entry.model}|${entry.provider || "unknown"}`;
-  addToCounter(day.byEndpoint, epKey, { ...vals, meta: { endpoint, rawModel: entry.model, provider: entry.provider } });
+  for (const [dateKey, changes] of dayDeltas) {
+    const dayRow = db.get(`SELECT data FROM usageDaily WHERE dateKey = ?`, [dateKey]);
+    if (!dayRow) continue;
+    const day = parseJson(dayRow.data, {});
+    for (const [row, delta] of changes) {
+      day.cost = (day.cost || 0) + delta;
+      for (const [field, key] of Object.entries(dayBucketKeys(row))) {
+        if (key && day[field]?.[key]) day[field][key].cost = (day[field][key].cost || 0) + delta;
+      }
+    }
+    db.run(`UPDATE usageDaily SET data = ? WHERE dateKey = ?`, [stringifyJson(day), dateKey]);
+  }
+  if (dayDeltas.size) scheduleStatsEvent("update", 250);
 }
 
 function pushToRing(entry) {
@@ -130,24 +172,6 @@ async function ensureRingInitialized() {
       tokens: parseJson(r.tokens, {}),
     }));
   } catch {}
-}
-
-async function calculateCost(provider, model, tokens) {
-  if (!tokens || !provider || !model) return 0;
-  try {
-    const { getPricingForModel } = await import("./pricingRepo.js");
-    const pricing = await getPricingForModel(provider, model);
-    if (!pricing) return 0;
-
-    // Delegate the actual math to the single source of truth (avoids the two
-    // copies drifting apart — see open-sse/providers/pricing.js for the
-    // cache-inclusive prompt_tokens convention this assumes).
-    const { calculateCostFromTokens } = await import("open-sse/providers/pricing.js");
-    return calculateCostFromTokens(tokens, pricing);
-  } catch (e) {
-    console.error("Error calculating cost:", e);
-    return 0;
-  }
 }
 
 export function trackPendingRequest(model, provider, connectionId, started, error = false) {
@@ -242,9 +266,10 @@ export async function getActiveRequests() {
 export async function saveRequestUsage(entry) {
   try {
     const db = await getAdapter();
+    const { createPricingResolver } = await import("./pricingRepo.js");
+    const resolvePricing = await createPricingResolver();
 
     if (!entry.timestamp) entry.timestamp = new Date().toISOString();
-    entry.cost = await calculateCost(entry.provider, entry.model, entry.tokens);
 
     const tokens = entry.tokens || {};
     const promptTokens = tokens.prompt_tokens || tokens.input_tokens || 0;
@@ -252,9 +277,9 @@ export async function saveRequestUsage(entry) {
 
     let inserted = false;
 
-    // All 3 writes (history insert, daily upsert, lifetime counter) in ONE transaction.
-    // better-sqlite3 is sync → no JS yield mid-transaction → no race in same process.
     db.transaction(() => {
+      const pricing = resolvePricing(db, entry.provider, entry.model);
+      entry.cost = pricing ? calculateCostFromTokens(tokens, pricing) : 0;
       const existing = db.get(
         `SELECT id, endpoint FROM usageHistory
          WHERE timestamp = ?
@@ -340,7 +365,7 @@ function loadDaysInRange(adapter, maxDays) {
   }
   const today = new Date();
   const cutoff = new Date(today.getFullYear(), today.getMonth(), today.getDate() - maxDays + 1);
-  const cutoffKey = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, "0")}-${String(cutoff.getDate()).padStart(2, "0")}`;
+  const cutoffKey = getLocalDateKey(cutoff);
   return adapter.all(`SELECT dateKey, data FROM usageDaily WHERE dateKey >= ? ORDER BY dateKey ASC`, [cutoffKey]);
 }
 
@@ -737,7 +762,7 @@ export async function getChartData(period = "7d") {
     return Array.from({ length: diffDays }, (_, i) => {
       const d = new Date(earliest);
       d.setDate(d.getDate() + i);
-      const dateKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      const dateKey = getLocalDateKey(d);
       const dayData = dayMap[dateKey];
       return {
         label: labelFn(d),
@@ -759,7 +784,7 @@ export async function getChartData(period = "7d") {
   return Array.from({ length: bucketCount }, (_, i) => {
     const d = new Date(today);
     d.setDate(d.getDate() - (bucketCount - 1 - i));
-    const dateKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const dateKey = getLocalDateKey(d);
     const dayData = dayMap[dateKey];
     return {
       label: labelFn(d),

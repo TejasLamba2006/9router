@@ -83,18 +83,21 @@ describe("Schema migrations", () => {
     expect(aliases).toHaveLength(1);
   });
 
-  it("auto-sync re-creates missing index when DB lacks it", async () => {
+  it.each([
+    ["providerNodes", "idx_pn_type"],
+    ["usageHistory", "idx_uh_provider_model"],
+  ])("auto-sync re-creates missing %s index", async (table, index) => {
     const { getAdapter } = await import("@/lib/db/driver.js");
     const db = await getAdapter();
-    db.exec(`DROP INDEX IF EXISTS idx_pn_type`);
-    expect(db.all(`PRAGMA index_list(providerNodes)`).map(i => i.name)).not.toContain("idx_pn_type");
+    db.exec(`DROP INDEX IF EXISTS ${index}`);
+    expect(db.all(`PRAGMA index_list(${table})`).map(i => i.name)).not.toContain(index);
     db.close?.();
 
     delete global._dbAdapter;
     vi.resetModules();
     const { getAdapter: getAdapter2 } = await import("@/lib/db/driver.js");
     const db2 = await getAdapter2();
-    const idx = db2.all(`PRAGMA index_list(providerNodes)`).map(i => i.name);
-    expect(idx).toContain("idx_pn_type");
+    const idx = db2.all(`PRAGMA index_list(${table})`).map(i => i.name);
+    expect(idx).toContain(index);
   });
 });

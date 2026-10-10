@@ -19,6 +19,7 @@ import { filterAndSortModelRows } from "@/shared/utils/modelToolbar";
 import ModelVisibilityToolbar from "./ModelVisibilityToolbar";
 import ModelBatchToolbar from "./ModelBatchToolbar";
 import useModelBatchTest from "./useModelBatchTest";
+import useModelPricing from "./useModelPricing";
 import ModelRow from "./ModelRow";
 import PassthroughModelsSection from "./PassthroughModelsSection";
 import CompatibleModelsSection from "./CompatibleModelsSection";
@@ -261,6 +262,12 @@ export default function ProviderDetailPage() {
   }, [providerStorageAlias]);
 
   const modelBatch = useModelBatchTest({ providerId, connections, onVisibilityChanged: fetchDisabledModels, noAuth: isFreeNoAuth });
+  const pricedModelIds = [...new Set([
+    ...getProviderCustomModelRows({ customModels, modelAliases, providerAlias: providerStorageAlias, builtInModels: models, type: "llm" }).map((m) => m.id),
+    ...models.map((m) => m.id),
+    ...kiloFreeModels.map((m) => m.id),
+  ])];
+  const modelPricing = useModelPricing(isCompatible ? null : providerId, pricedModelIds);
 
   const handleDisableModel = async (modelId) => {
     try {
@@ -1228,6 +1235,9 @@ export default function ProviderDetailPage() {
                 capabilityEvidence={modelBatch.capabilityEvidence[model.id]}
                 caps={getCaps(`${providerId}/${model.id}`)}
                 thinkingSuffix={resolveThinkingSuffix(model.id)}
+                pricing={modelPricing.pricing[model.id]}
+                onSavePricing={(rates) => modelPricing.save(model.id, rates)}
+                onResetPricing={() => modelPricing.reset(model.id).catch((error) => alert(error.message))}
               />
             );
           }
@@ -1261,6 +1271,9 @@ export default function ProviderDetailPage() {
               capabilityEvidence={modelBatch.capabilityEvidence[model.id]}
               caps={getCaps(`${providerId}/${model.id}`)}
               thinkingSuffix={resolveThinkingSuffix(model.id)}
+              pricing={modelPricing.pricing[model.id]}
+              onSavePricing={(rates) => modelPricing.save(model.id, rates)}
+              onResetPricing={() => modelPricing.reset(model.id).catch((error) => alert(error.message))}
             />
           );
         })}

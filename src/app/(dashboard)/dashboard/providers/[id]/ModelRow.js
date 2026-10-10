@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import PropTypes from "prop-types";
 import { CapacityBadges } from "@/shared/components";
 import ModelCapabilityBadges from "@/shared/components/ModelCapabilityBadges";
-import { getModelSourceBadge, getModelTestPresentation } from "@/shared/utils/modelRowPresentation.js";
+import { getModelPricingPresentation, getModelSourceBadge, getModelTestPresentation, parsePricingInput } from "@/shared/utils/modelRowPresentation.js";
 
 export default function ModelRow({
   model,
@@ -27,6 +27,9 @@ export default function ModelRow({
   onToggleSelected,
   batchResult,
   capabilityEvidence,
+  pricing,
+  onSavePricing,
+  onResetPricing,
 }) {
   const displayModel = thinkingSuffix ? `${fullModel}(${thinkingSuffix})` : fullModel;
   const sourceBadge = getModelSourceBadge(model.source);
@@ -34,6 +37,24 @@ export default function ModelRow({
   const [editingAlias, setEditingAlias] = useState(false);
   const [aliasValue, setAliasValue] = useState(alias || "");
   const aliasInputRef = useRef(null);
+  const price = getModelPricingPresentation(pricing);
+  const [editingPrice, setEditingPrice] = useState(false);
+  const [priceDraft, setPriceDraft] = useState({ input: "", output: "" });
+  const [savingPrice, setSavingPrice] = useState(false);
+  const priceRates = parsePricingInput(priceDraft);
+
+  const savePrice = async () => {
+    if (!priceRates) return;
+    setSavingPrice(true);
+    try {
+      await onSavePricing(priceRates);
+      setEditingPrice(false);
+    } catch (error) {
+      alert(error.message || "Failed to save price");
+    } finally {
+      setSavingPrice(false);
+    }
+  };
 
   useEffect(() => {
     if (editingAlias) aliasInputRef.current?.focus();
@@ -112,6 +133,54 @@ export default function ModelRow({
         >
           <span className="material-symbols-outlined text-sm">{copied === `model-${model.id}` ? "check" : "content_copy"}</span>
         </button>
+        {onSavePricing && (editingPrice ? (
+          <span className="flex items-center gap-1 text-[10px] text-text-muted">
+            <label className="flex items-center gap-0.5">
+              In $
+              <input
+                type="number" min="0" step="any" inputMode="decimal"
+                aria-label={`Input price for ${model.id} in dollars per 1M tokens`}
+                value={priceDraft.input}
+                onChange={(event) => setPriceDraft((d) => ({ ...d, input: event.target.value }))}
+                className="w-16 rounded border border-border bg-surface px-1 py-0.5 text-text-main"
+              />
+            </label>
+            <label className="flex items-center gap-0.5">
+              Out $
+              <input
+                type="number" min="0" step="any" inputMode="decimal"
+                aria-label={`Output price for ${model.id} in dollars per 1M tokens`}
+                value={priceDraft.output}
+                onChange={(event) => setPriceDraft((d) => ({ ...d, output: event.target.value }))}
+                onKeyDown={(event) => { if (event.key === "Enter") savePrice(); if (event.key === "Escape") setEditingPrice(false); }}
+                className="w-16 rounded border border-border bg-surface px-1 py-0.5 text-text-main"
+              />
+            </label>
+            <span>$ / 1M tokens</span>
+            <button type="button" onClick={savePrice} disabled={!priceRates || savingPrice} title="Save price" className="rounded p-0.5 hover:text-primary disabled:opacity-40">
+              <span className="material-symbols-outlined text-sm">check</span>
+            </button>
+            <button type="button" onClick={() => setEditingPrice(false)} title="Cancel" className="rounded p-0.5 hover:text-primary">
+              <span className="material-symbols-outlined text-sm">close</span>
+            </button>
+          </span>
+        ) : (
+          <span className="flex items-center gap-1 text-[10px] text-text-muted">
+            <button
+              type="button"
+              onClick={() => { setPriceDraft({ input: price.input, output: price.output }); setEditingPrice(true); }}
+              title="Edit price ($ / 1M tokens)"
+              className="rounded px-1 hover:text-primary"
+            >
+              {price.label}
+            </button>
+            {price.canReset && onResetPricing && (
+              <button type="button" onClick={onResetPricing} title="Reset to default price" className="rounded p-0.5 hover:text-primary">
+                <span className="material-symbols-outlined text-sm">restart_alt</span>
+              </button>
+            )}
+          </span>
+        ))}
       </div>
       <div className="flex shrink-0 items-center gap-1">
         <button
@@ -163,4 +232,7 @@ ModelRow.propTypes = {
   onToggleSelected: PropTypes.func,
   batchResult: PropTypes.shape({ ok: PropTypes.bool, classification: PropTypes.string }),
   capabilityEvidence: PropTypes.object,
+  pricing: PropTypes.shape({ rates: PropTypes.object, source: PropTypes.string }),
+  onSavePricing: PropTypes.func,
+  onResetPricing: PropTypes.func,
 };

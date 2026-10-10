@@ -2,6 +2,7 @@ import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 import { makeKv } from "../helpers/kvStore.js";
 import { normalizePricingRates } from "@/lib/pricingView.js";
+import { pricingPairKey, repriceUsageSync } from "./usageRepo.js";
 
 const pricingKv = makeKv("pricing");
 const CACHE_TTL_MS = 5000;
@@ -53,13 +54,17 @@ export async function getPricing() {
   return merged;
 }
 
-export async function getPricingForModelWithSource(provider, model) {
-  if (!model) return null;
-  const [userPricing, { getCatalogPricing }, { getPricingForModel: resolveConst, isFreeModel }] = await Promise.all([
-    getUserPricing(),
+async function loadPricingSources() {
+  const [catalog, pricing] = await Promise.all([
     import("open-sse/providers/catalogOverride.js"),
     import("open-sse/providers/pricing.js"),
   ]);
+  return { getCatalogPricing: catalog.getCatalogPricing, resolveConst: pricing.getPricingForModel, isFreeModel: pricing.isFreeModel };
+}
+
+function resolvePricingSync(sources, userPricing, provider, model) {
+  if (!model) return null;
+  const { getCatalogPricing, resolveConst, isFreeModel } = sources;
   const synced = !isFreeModel(model) ? getCatalogPricing(provider, model) : null;
   const hardcoded = resolveConst(provider, model);
   const base = synced
@@ -74,57 +79,101 @@ export async function getPricingForModelWithSource(provider, model) {
   return manualRates ? { rates: manualRates, source: "manual", syncedAt: null } : base;
 }
 
+export async function getPricingForModelWithSource(provider, model) {
+  if (!model) return null;
+  const [userPricing, sources] = await Promise.all([getUserPricing(), loadPricingSources()]);
+  return resolvePricingSync(sources, userPricing, provider, model);
+}
+
+export async function getPricingForModelsWithSource(provider, models) {
+  const [userPricing, sources] = await Promise.all([getUserPricing(), loadPricingSources()]);
+  return Object.fromEntries(models.map((model) => [model, resolvePricingSync(sources, userPricing, provider, model)]));
+}
+
+export async function createPricingResolver() {
+  const sources = await loadPricingSources();
+  return (db, provider, model) => {
+    const row = db.get(`SELECT value FROM kv WHERE scope = 'pricing' AND key = ?`, [provider]);
+    const manual = row ? { [provider]: parseJson(row.value, {}) || {} } : {};
+    return resolvePricingSync(sources, manual, provider, model)?.rates || null;
+  };
+}
+
 export async function getPricingForModel(provider, model) {
   return (await getPricingForModelWithSource(provider, model))?.rates || null;
 }
 
-// Atomic merge inside transaction (per-provider read-modify-write)
-export async function updatePricing(pricingData) {
+function readManualSync(db) {
+  const manual = {};
+  for (const row of db.all(`SELECT key, value FROM kv WHERE scope = 'pricing'`)) {
+    manual[row.key] = parseJson(row.value, {}) || {};
+  }
+  return manual;
+}
+
+function writeProviderSync(db, provider, models) {
+  if (Object.keys(models).length === 0) {
+    db.run(`DELETE FROM kv WHERE scope = 'pricing' AND key = ?`, [provider]);
+    return;
+  }
+  db.run(
+    `INSERT INTO kv(scope, key, value) VALUES('pricing', ?, ?) ON CONFLICT(scope, key) DO UPDATE SET value = excluded.value`,
+    [provider, stringifyJson(models)]
+  );
+}
+
+async function mutatePricing(mutate) {
   const db = await getAdapter();
+  const sources = await loadPricingSources();
   db.transaction(() => {
-    for (const [provider, models] of Object.entries(pricingData)) {
-      const row = db.get(`SELECT value FROM kv WHERE scope = 'pricing' AND key = ?`, [provider]);
-      const current = row ? (parseJson(row.value, {}) || {}) : {};
-      const merged = { ...current };
-      for (const [model, pricing] of Object.entries(models)) {
-        merged[model] = { ...(current[model] || {}), ...pricing };
-      }
-      db.run(
-        `INSERT INTO kv(scope, key, value) VALUES('pricing', ?, ?) ON CONFLICT(scope, key) DO UPDATE SET value = excluded.value`,
-        [provider, stringifyJson(merged)]
-      );
+    const manual = readManualSync(db);
+    const pairs = mutate(manual);
+    for (const provider of new Set(pairs.map(([p]) => p))) {
+      writeProviderSync(db, provider, manual[provider] || {});
     }
+    const ratesByPair = new Map(pairs.map(([provider, model]) => [
+      pricingPairKey(provider, model),
+      resolvePricingSync(sources, manual, provider, model)?.rates || null,
+    ]));
+    repriceUsageSync(db, ratesByPair);
   });
   invalidate();
   return await getUserPricing();
+}
+
+export async function updatePricing(pricingData) {
+  return await mutatePricing((manual) => {
+    const pairs = [];
+    for (const [provider, models] of Object.entries(pricingData)) {
+      manual[provider] ||= {};
+      for (const [model, pricing] of Object.entries(models)) {
+        manual[provider][model] = { ...(manual[provider][model] || {}), ...pricing };
+        pairs.push([provider, model]);
+      }
+    }
+    return pairs;
+  });
 }
 
 export async function resetPricing(provider, model) {
   if (!provider) return await getUserPricing();
-  const db = await getAdapter();
-  db.transaction(() => {
-    if (!model) {
-      db.run(`DELETE FROM kv WHERE scope = 'pricing' AND key = ?`, [provider]);
-      return;
-    }
-    const row = db.get(`SELECT value FROM kv WHERE scope = 'pricing' AND key = ?`, [provider]);
-    const current = row ? (parseJson(row.value, {}) || {}) : {};
-    delete current[model];
-    if (Object.keys(current).length === 0) {
-      db.run(`DELETE FROM kv WHERE scope = 'pricing' AND key = ?`, [provider]);
-    } else {
-      db.run(
-        `INSERT INTO kv(scope, key, value) VALUES('pricing', ?, ?) ON CONFLICT(scope, key) DO UPDATE SET value = excluded.value`,
-        [provider, stringifyJson(current)]
-      );
-    }
+  return await mutatePricing((manual) => {
+    const current = manual[provider] || {};
+    const models = model ? (model in current ? [model] : []) : Object.keys(current);
+    for (const m of models) delete current[m];
+    manual[provider] = current;
+    return model ? [[provider, model]] : models.map((m) => [provider, m]);
   });
-  invalidate();
-  return await getUserPricing();
 }
 
 export async function resetAllPricing() {
-  await pricingKv.clear();
-  invalidate();
+  await mutatePricing((manual) => {
+    const pairs = [];
+    for (const [provider, models] of Object.entries(manual)) {
+      for (const model of Object.keys(models)) pairs.push([provider, model]);
+      manual[provider] = {};
+    }
+    return pairs;
+  });
   return {};
 }
