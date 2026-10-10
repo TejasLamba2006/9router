@@ -105,6 +105,36 @@ describe("custom provider node service kinds", () => {
     expect(connection.providerSpecificData.serviceKinds).toEqual(["video", "tts"]);
   });
 
+  it("lists compatible-node models under each declared media kind", async () => {
+    const { POST } = await import("@/app/api/provider-nodes/route.js");
+    const createdResponse = await POST(request({
+      name: "Catalog Media Node",
+      prefix: "catalog-media",
+      apiType: "chat",
+      baseUrl: "https://media.example/v1",
+      type: "openai-compatible",
+      serviceKinds: ["image", "tts", "stt", "video"],
+    }));
+    const { node } = await createdResponse.json();
+    const { createProviderConnection, addCustomModel } = await import("@/models/index.js");
+    await createProviderConnection({
+      provider: node.id,
+      authType: "apikey",
+      name: "Connection",
+      apiKey: "secret",
+      providerSpecificData: { prefix: node.prefix, baseUrl: node.baseUrl, serviceKinds: node.serviceKinds },
+    });
+    for (const type of ["image", "tts", "stt", "video"]) {
+      await addCustomModel({ providerAlias: node.prefix, id: `${type}-model`, type });
+    }
+    const { buildModelsList } = await import("@/app/api/v1/models/route.js");
+
+    for (const kind of ["image", "tts", "stt", "video"]) {
+      const ids = (await buildModelsList([kind], { skipDynamicFetch: true })).map((model) => model.id);
+      expect(ids).toContain(`catalog-media/${kind}-model`);
+    }
+  });
+
   it("rejects unknown services and media services on Anthropic nodes", async () => {
     const { POST } = await import("@/app/api/provider-nodes/route.js");
     const unknown = await POST(request({

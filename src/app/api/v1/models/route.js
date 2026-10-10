@@ -2,11 +2,12 @@ import { PROVIDER_MODELS, PROVIDER_ID_TO_ALIAS, getModelKind } from "@/shared/co
 import {
   ALIAS_TO_ID,
   AI_PROVIDERS,
+  getNodeServiceKinds,
   getProviderAlias,
   isAnthropicCompatibleProvider,
   isOpenAICompatibleProvider,
 } from "@/shared/constants/providers";
-import { getProviderConnections, getCombos, getCustomModels, getModelAliases } from "@/lib/localDb";
+import { getProviderConnections, getProviderNodes, getCombos, getCustomModels, getModelAliases } from "@/lib/localDb";
 import { getDisabledModels } from "@/lib/disabledModelsDb";
 import { getKeyAccessContext, filterModelsListForKey } from "@/sse/services/keyAccess.js";
 import { getDisabledModelIds } from "@/sse/services/modelVisibility.js";
@@ -258,11 +259,14 @@ async function fetchCompatibleModelIds(connection) {
 
 // Provider matches kindFilter when its serviceKinds intersect the requested kinds.
 // LLM is the default kind for providers missing serviceKinds.
-function providerMatchesKinds(providerId, kindFilter) {
+function providerMatchesKinds(providerId, kindFilter, nodeById = null) {
+  const node = nodeById?.get(providerId);
   const provider = AI_PROVIDERS[providerId];
-  const kinds = Array.isArray(provider?.serviceKinds) && provider.serviceKinds.length > 0
-    ? provider.serviceKinds
-    : [LLM_KIND];
+  const kinds = node
+    ? [...(node.type === "openai-compatible" ? [LLM_KIND] : []), ...getNodeServiceKinds(node)]
+    : (Array.isArray(provider?.serviceKinds) && provider.serviceKinds.length > 0
+      ? provider.serviceKinds
+      : [LLM_KIND]);
   return kindFilter.some((k) => kinds.includes(k));
 }
 
@@ -345,6 +349,14 @@ export async function buildModelsList(kindFilter, options = {}) {
     console.log("Could not fetch custom models");
   }
 
+  let providerNodes = [];
+  try {
+    providerNodes = await getProviderNodes();
+  } catch (e) {
+    console.log("Could not fetch provider nodes");
+  }
+  const nodeById = new Map(providerNodes.map((node) => [node.id, node]));
+
   let modelAliases = {};
   try {
     modelAliases = await getModelAliases();
@@ -403,7 +415,7 @@ export async function buildModelsList(kindFilter, options = {}) {
     // DB unavailable -> return static models, filtered by per-model kind
     for (const [alias, providerModels] of Object.entries(PROVIDER_MODELS)) {
       const providerId = ALIAS_TO_PROVIDER_ID[alias] || alias;
-      if (!providerMatchesKinds(providerId, kindFilter)) continue;
+      if (!providerMatchesKinds(providerId, kindFilter, nodeById)) continue;
       for (const model of providerModels) {
         if (!kindFilter.includes(modelKind(model))) continue;
         if (isDisabled(alias, model.id)) continue;
@@ -436,7 +448,7 @@ export async function buildModelsList(kindFilter, options = {}) {
     }
   } else {
     for (const [providerId, conn] of activeConnectionByProvider.entries()) {
-      if (!providerMatchesKinds(providerId, kindFilter)) continue;
+      if (!providerMatchesKinds(providerId, kindFilter, nodeById)) continue;
 
       const staticAlias = PROVIDER_ID_TO_ALIAS[providerId] || providerId;
       const outputAlias = (
