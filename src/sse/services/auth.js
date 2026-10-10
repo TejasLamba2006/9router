@@ -47,6 +47,22 @@ function githubMonthlyResetMs(status, errorText, provider) {
   return Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1);
 }
 
+async function resolveNoAuthProxy(providerId) {
+  const settings = await getSettings();
+  const override = (settings.providerStrategies || {})[providerId] || {};
+  const strategy = override.rotateStrategy || "none";
+  let poolId = override.proxyPoolId || null;
+  if (strategy !== "none") {
+    const pools = await getProxyPools({ isActive: true });
+    poolId = pickProxyPoolId(
+      pools.filter((pool) => pool.proxyUrl).map((pool) => pool.id),
+      strategy,
+      providerId
+    );
+  }
+  return resolveConnectionProxyConfig({ proxyPoolId: poolId || "" });
+}
+
 /**
  * Get provider credentials from localDb
  * Filters out unavailable accounts and returns the selected account based on strategy
@@ -57,7 +73,7 @@ function githubMonthlyResetMs(status, errorText, provider) {
 export async function getProviderCredentialsById(provider, connectionId) {
   const providerId = resolveProviderId(provider);
   if (connectionId === "noauth" && FREE_PROVIDERS[providerId]?.noAuth) {
-    const resolvedProxy = await resolveConnectionProxyConfig({});
+    const resolvedProxy = await resolveNoAuthProxy(providerId);
     return credentialsFromConnection({
       id: "noauth",
       provider: providerId,
@@ -95,16 +111,7 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
 
     // Inject a virtual connection for no-auth free providers (with optional proxy pool from settings)
     if (FREE_PROVIDERS[providerId]?.noAuth) {
-      const settings = await getSettings();
-      const override = (settings.providerStrategies || {})[providerId] || {};
-      const strategy = override.rotateStrategy || "none";
-      let pickedId = override.proxyPoolId || null;
-      if (strategy !== "none") {
-        const allPools = await getProxyPools({ isActive: true });
-        const poolIds = allPools.filter(p => p.proxyUrl).map(p => p.id);
-        pickedId = pickProxyPoolId(poolIds, strategy, providerId);
-      }
-      const resolvedProxy = await resolveConnectionProxyConfig({ proxyPoolId: pickedId || "" });
+      const resolvedProxy = await resolveNoAuthProxy(providerId);
       return {
         id: "noauth",
         connectionName: "Public",

@@ -225,7 +225,7 @@ export default function ProviderDetailPage() {
     return levels && levels.includes(thinkingMode) ? thinkingMode : null;
   };
   const providerStorageAlias = isCompatible ? providerId : providerAlias;
-  const supportsStrictModelTests = !isFreeNoAuth && providerId !== "cursor" && providerId !== "zed";
+  const supportsStrictModelTests = providerId !== "cursor" && providerId !== "zed";
   // Union of levels across this provider's reasoning models — drives the level picker options.
   // Include custom models too (e.g. manually added gpt-5.6-sol → max).
   const providerThinkingLevels = (() => {
@@ -260,7 +260,7 @@ export default function ProviderDetailPage() {
     }
   }, [providerStorageAlias]);
 
-  const modelBatch = useModelBatchTest({ providerId, connections, onVisibilityChanged: fetchDisabledModels });
+  const modelBatch = useModelBatchTest({ providerId, connections, onVisibilityChanged: fetchDisabledModels, noAuth: isFreeNoAuth });
 
   const handleDisableModel = async (modelId) => {
     try {

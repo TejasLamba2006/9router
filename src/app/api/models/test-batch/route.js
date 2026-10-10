@@ -1,6 +1,7 @@
 import { getCustomModels, getProviderConnectionById, upsertModelCapabilityEvidence } from "@/lib/localDb";
 import { runModelCapabilityProbeGroup } from "@/lib/modelCapabilityProbe";
 import { getModelsByProviderId } from "@/shared/constants/models";
+import { FREE_PROVIDERS } from "@/shared/constants/providers";
 import { runModelProbe } from "@/lib/modelProbe";
 import { AUTO_HIDE_CLASSIFICATIONS, DEFAULT_AUTO_HIDE_CLASSIFICATIONS, runModelTestBatch } from "@/lib/modelTestBatch";
 import { disableCanonicalModels, getDisabledModelIds, resolveVisibilityKeys } from "@/sse/services/modelVisibility";
@@ -55,12 +56,14 @@ export async function POST(request) {
   const autoHideClassifications = body.autoHideClassifications === undefined
     ? (body.autoHideHardFailures === true ? [...DEFAULT_AUTO_HIDE_CLASSIFICATIONS] : [])
     : [...new Set(body.autoHideClassifications)];
-  const connection = await getProviderConnectionById(connectionId);
-  if (!connection || connection.isActive === false || connection.provider !== providerId) {
+  const noAuthConnection = connectionId === "noauth" && FREE_PROVIDERS[providerId]?.noAuth === true;
+  const connection = noAuthConnection ? null : await getProviderConnectionById(connectionId);
+  if (!noAuthConnection && (!connection || connection.isActive === false || connection.provider !== providerId)) {
     return Response.json({ error: "Selected connection does not match provider" }, { status: 400 });
   }
-  if (activeConnections.has(connectionId)) return Response.json({ error: "A model test is already active for this connection" }, { status: 409 });
-  activeConnections.add(connectionId);
+  const activeConnectionKey = `${providerId}:${connectionId}`;
+  if (activeConnections.has(activeConnectionKey)) return Response.json({ error: "A model test is already active for this connection" }, { status: 409 });
+  activeConnections.add(activeConnectionKey);
 
   let modelIds;
   try {
@@ -77,11 +80,11 @@ export async function POST(request) {
     modelIds = [...new Set(body.modelIds.map((id) => id.trim()))]
       .filter((id) => inventory.has(id) && !hidden.has(id));
     if (modelIds.length === 0) {
-      activeConnections.delete(connectionId);
+      activeConnections.delete(activeConnectionKey);
       return Response.json({ error: "No visible models to test" }, { status: 400 });
     }
   } catch (lookupError) {
-    activeConnections.delete(connectionId);
+    activeConnections.delete(activeConnectionKey);
     throw lookupError;
   }
 
@@ -134,7 +137,7 @@ export async function POST(request) {
       } catch (runError) {
         line(controller, { type: "error", error: String(runError?.message || runError).slice(0, 500) });
       } finally {
-        activeConnections.delete(connectionId);
+        activeConnections.delete(activeConnectionKey);
         request.signal.removeEventListener("abort", abort);
         controller.close();
       }

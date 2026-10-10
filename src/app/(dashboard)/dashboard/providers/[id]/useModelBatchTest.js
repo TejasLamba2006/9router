@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { consumeModelBatchStream } from "@/shared/utils/modelBatchClient.js";
 import { DEFAULT_AUTO_HIDE_CLASSIFICATIONS } from "@/lib/modelTestBatch.js";
 
-export default function useModelBatchTest({ providerId, connections, onVisibilityChanged }) {
+export default function useModelBatchTest({ providerId, connections, onVisibilityChanged, noAuth = false }) {
   const [selectedIds, setSelectedIds] = useState([]);
   const [connectionId, setConnectionId] = useState("");
   const [cooldownSeconds, setCooldownSeconds] = useState("5");
@@ -15,12 +15,14 @@ export default function useModelBatchTest({ providerId, connections, onVisibilit
   const [capabilityEvidence, setCapabilityEvidence] = useState({});
   const abortRef = useRef(null);
   const evidenceRequestRef = useRef(0);
-  const activeConnections = connections.filter((connection) => connection.isActive !== false);
+  const activeConnections = noAuth
+    ? [{ id: "noauth", name: "Public", isActive: true }]
+    : connections.filter((connection) => connection.isActive !== false);
   const defaultConnectionId = activeConnections[0]?.id || "";
 
   const refreshCapabilityEvidence = useCallback(async (selectedConnectionId) => {
     const requestId = ++evidenceRequestRef.current;
-    if (!selectedConnectionId) { setCapabilityEvidence({}); return; }
+    if (!selectedConnectionId || selectedConnectionId === "noauth") { setCapabilityEvidence({}); return; }
     try {
       const response = await fetch(`/api/models/capabilities?provider=${encodeURIComponent(providerId)}&connectionId=${encodeURIComponent(selectedConnectionId)}`, { cache: "no-store" });
       const data = await response.json();
@@ -38,7 +40,7 @@ export default function useModelBatchTest({ providerId, connections, onVisibilit
   }, [providerId]);
   useEffect(() => {
     const selectedConnectionId = connectionId || defaultConnectionId;
-    if (!selectedConnectionId) return;
+    if (!selectedConnectionId || selectedConnectionId === "noauth") return;
     Promise.resolve().then(() => refreshCapabilityEvidence(selectedConnectionId));
   }, [connectionId, defaultConnectionId, refreshCapabilityEvidence]);
 
@@ -90,7 +92,10 @@ export default function useModelBatchTest({ providerId, connections, onVisibilit
     } catch (error) {
       if (error?.name !== "AbortError") setState((previous) => ({ ...previous, running: false, error: error.message }));
     } finally {
-      await Promise.all([onVisibilityChanged?.(), refreshCapabilityEvidence(selectedConnectionId)]);
+      await Promise.all([
+        onVisibilityChanged?.(),
+        selectedConnectionId === "noauth" ? Promise.resolve() : refreshCapabilityEvidence(selectedConnectionId),
+      ]);
       if (abortRef.current === controller) abortRef.current = null;
       setState((previous) => previous ? { ...previous, running: false } : previous);
     }

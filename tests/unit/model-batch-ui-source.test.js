@@ -19,10 +19,13 @@ describe("provider model batch UI wiring", () => {
     expect(compatible).not.toContain('fetch("/api/models/test"');
     expect(addModal).not.toContain('fetch("/api/models/test"');
     expect(nativePage).toContain("modelBatch.run([model.id])");
-    expect(nativePage).toContain('const supportsStrictModelTests = !isFreeNoAuth && providerId !== "cursor" && providerId !== "zed"');
+    expect(nativePage).toContain('const supportsStrictModelTests = providerId !== "cursor" && providerId !== "zed"');
+    expect(nativePage).toContain("noAuth: isFreeNoAuth");
     expect(compatible).toContain("batch.run([model.id])");
+    expect(hook).toContain('{ id: "noauth", name: "Public", isActive: true }');
     expect(hook).toContain('fetch("/api/models/test-batch"');
     expect(hook).toContain("connectionId: selectedConnectionId");
+    expect(hook).toContain('if (!selectedConnectionId || selectedConnectionId === "noauth") { setCapabilityEvidence({}); return; }');
   });
 
   it("separates row hide from confirmed bulk hide and syncs auto-hide immediately", () => {

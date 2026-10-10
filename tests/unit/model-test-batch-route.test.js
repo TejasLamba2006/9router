@@ -15,9 +15,17 @@ vi.mock("@/lib/localDb", () => ({
     { providerAlias: "openai", id: "hidden", type: "llm" },
     { providerAlias: "openai", id: "gone", type: "llm" },
     { providerAlias: "cx", id: "custom-codex", type: "llm" },
+    { providerAlias: "opencode", id: "free-model", type: "llm" },
+    { providerAlias: "other-free", id: "other-free-model", type: "llm" },
   ],
 }));
 vi.mock("@/shared/constants/models", () => ({ getModelsByProviderId: () => [] }));
+vi.mock("@/shared/constants/providers", () => ({
+  FREE_PROVIDERS: {
+    opencode: { noAuth: true },
+    "other-free": { noAuth: true },
+  },
+}));
 vi.mock("@/lib/modelProbe", () => ({ runModelProbe: mocks.probe }));
 vi.mock("@/lib/modelCapabilityProbe", () => ({ runModelCapabilityProbeGroup: mocks.capabilityGroup }));
 vi.mock("@/sse/services/modelVisibility", () => ({
@@ -61,6 +69,34 @@ describe("model test batch route", () => {
     expect(mocks.probe.mock.calls.map(([arg]) => [arg.model, arg.connectionId])).toEqual([["a", "conn-a"], ["b", "conn-a"]]);
     expect(events[0]).toMatchObject({ type: "start", total: 2, skippedHidden: 1 });
     expect(events.at(-1)).toMatchObject({ type: "done", done: 2 });
+  });
+
+  it("accepts the virtual no-auth connection for free providers", async () => {
+    fx.connection = null;
+    const { response } = await run({ providerId: "opencode", connectionId: "noauth", modelIds: ["free-model"], cooldownMs: 0 });
+    expect(response.status).toBe(200);
+    expect(mocks.probe).toHaveBeenCalledWith(expect.objectContaining({ provider: "opencode", model: "free-model", connectionId: "noauth" }));
+  });
+
+  it("rejects the virtual no-auth connection for authenticated providers", async () => {
+    fx.connection = null;
+    const { response, json } = await run({ providerId: "openai", connectionId: "noauth", modelIds: ["a"], cooldownMs: 0 });
+    expect(response.status).toBe(400);
+    expect(json.error).toBe("Selected connection does not match provider");
+    expect(mocks.probe).not.toHaveBeenCalled();
+  });
+
+  it("scopes virtual no-auth concurrency locks by provider", async () => {
+    let release;
+    mocks.probe.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+    const first = run({ providerId: "opencode", connectionId: "noauth", modelIds: ["free-model"], cooldownMs: 0 });
+    await vi.waitFor(() => expect(mocks.probe).toHaveBeenCalledTimes(1));
+
+    const second = await run({ providerId: "other-free", connectionId: "noauth", modelIds: ["other-free-model"], cooldownMs: 0 });
+    expect(second.response.status).toBe(200);
+
+    release({ modelId: "free-model", classification: "healthy", ok: true, status: 200, latencyMs: 1, retryAfterMs: 0, message: "" });
+    expect((await first).response.status).toBe(200);
   });
 
   it("accepts native custom models stored under the provider alias", async () => {
