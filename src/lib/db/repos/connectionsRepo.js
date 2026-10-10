@@ -20,6 +20,8 @@ function resetHealthStateOnActivation(existing, patch) {
     testStatus: "active",
     lastError: Object.hasOwn(patch, "lastError") ? patch.lastError : null,
     lastErrorAt: Object.hasOwn(patch, "lastErrorAt") ? patch.lastErrorAt : null,
+    lastErrorType: Object.hasOwn(patch, "lastErrorType") ? patch.lastErrorType : null,
+    lastErrorSource: Object.hasOwn(patch, "lastErrorSource") ? patch.lastErrorSource : null,
     errorCode: null,
     rateLimitedUntil: null,
     backoffLevel: 0,

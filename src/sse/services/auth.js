@@ -5,6 +5,7 @@ import { MAX_RATE_LIMIT_COOLDOWN_MS } from "open-sse/config/errorConfig.js";
 import { resolveProviderId, FREE_PROVIDERS } from "@/shared/constants/providers.js";
 import { getAntigravityQuotaCache, getAntigravityModelQuota } from "./antigravityQuota.js";
 import * as log from "../utils/logger.js";
+import { isClaudeExtraUsageAllowed, isClaudeExtraUsageState } from "@/lib/providers/claudeExtraUsage.js";
 
 // Mutex to prevent race conditions during account selection
 let selectionMutex = Promise.resolve();
@@ -139,10 +140,15 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     const isAntigravity = providerId === "antigravity";
     const antigravityQuotaCache = isAntigravity && model ? getAntigravityQuotaCache() : null;
 
-    // Filter out model-locked, excluded, and Antigravity quota-exhausted connections.
+    // Filter out model-locked, excluded, and account-wide cooldowns.
     const availableConnections = connections.filter(c => {
       if (excludeSet.has(c.id)) return false;
       if (isModelLockActive(c, model)) return false;
+      if (
+        c.rateLimitedUntil
+        && new Date(c.rateLimitedUntil).getTime() > Date.now()
+        && !(isClaudeExtraUsageState(c) && isClaudeExtraUsageAllowed(providerId, c.providerSpecificData))
+      ) return false;
       const enabled = c.providerSpecificData?.enabledModels;
       if (providerId === "codex" && Array.isArray(enabled) && enabled.length && requestedModel && !enabled.includes(requestedModel)) return false;
       // Antigravity: skip if live quota exhausted for this model
@@ -338,6 +344,7 @@ export async function clearAccountError(connectionId, currentConnection, model =
   const now = Date.now();
   const allLockKeys = Object.keys(conn).filter(k => k.startsWith("modelLock_"));
 
+  if (isClaudeExtraUsageState(conn)) return;
   if (!conn.testStatus && !conn.lastError && allLockKeys.length === 0) return;
 
   // Keys to clear: current model's lock + all expired locks

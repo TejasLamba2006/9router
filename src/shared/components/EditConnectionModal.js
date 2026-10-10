@@ -8,6 +8,7 @@ import Button from "@/shared/components/Button";
 import Badge from "@/shared/components/Badge";
 import { isOpenAICompatibleProvider, isAnthropicCompatibleProvider, AI_PROVIDERS } from "@/shared/constants/providers";
 import Select from "@/shared/components/Select";
+import Toggle from "@/shared/components/Toggle";
 
 export default function EditConnectionModal({ isOpen, connection, proxyPools, onSave, onClose }) {
   const [formData, setFormData] = useState({
@@ -30,6 +31,7 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
   const [validating, setValidating] = useState(false);
   const [validationResult, setValidationResult] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [blockExtraUsage, setBlockExtraUsage] = useState(true);
 
   useEffect(() => {
     if (connection) {
@@ -66,6 +68,7 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
         const savedRegion = connection.providerSpecificData?.region || providerCfg.defaultRegion || providerCfg.regions[0]?.id || "";
         setRegion(savedRegion);
       }
+      setBlockExtraUsage(connection.providerSpecificData?.blockExtraUsage !== false);
       setTestResult(null);
       setValidationResult(null);
     }
@@ -198,7 +201,14 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
       if (providerRegions && region) {
         updates.providerSpecificData = buildRegionSpecificData();
       }
-      
+      if (connection.provider === "claude") {
+        updates.providerSpecificData = {
+          ...(connection.providerSpecificData || {}),
+          ...(updates.providerSpecificData || {}),
+          blockExtraUsage,
+        };
+      }
+
       await onSave(updates);
     } finally {
       setSaving(false);
@@ -221,6 +231,14 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
             <p className="text-sm text-text-muted mb-1">Email</p>
             <p className="font-medium">{connection.email}</p>
           </div>
+        )}
+        {connection.provider === "claude" && (
+          <Toggle
+            checked={blockExtraUsage}
+            onChange={setBlockExtraUsage}
+            label="Block Claude extra usage"
+            description="Prevent paid credits after subscription limits are exhausted."
+          />
         )}
         <Input
           label="Priority"

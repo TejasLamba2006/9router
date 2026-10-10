@@ -6,6 +6,10 @@ import {
   deleteProviderConnection,
 } from "@/models";
 import { toProviderConnectionResponse, usesAwsCredentialForm } from "@/lib/providerConnectionResponse";
+import {
+  buildClaudeExtraUsageStateClearUpdate,
+  isClaudeExtraUsageBlockEnabled,
+} from "@/lib/providers/claudeExtraUsage";
 
 function normalizeProxyConfig(body = {}) {
   const hasAnyProxyField =
@@ -156,6 +160,11 @@ export async function PUT(request, { params }) {
         } else {
           updateData.providerSpecificData.proxyPoolId = proxyPoolResult.proxyPoolId;
         }
+      }
+
+      if (!isClaudeExtraUsageBlockEnabled(existing.provider, updateData.providerSpecificData)) {
+        const clearExtraUsageUpdate = buildClaudeExtraUsageStateClearUpdate(existing);
+        if (clearExtraUsageUpdate) Object.assign(updateData, clearExtraUsageUpdate);
       }
     }
 

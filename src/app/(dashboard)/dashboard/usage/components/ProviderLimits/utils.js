@@ -586,8 +586,8 @@ export function parseQuotaData(provider, data) {
             resetAt: null,
             message: data.message,
           });
-        } else if (data.quotas) {
-          Object.entries(data.quotas).forEach(([name, quota]) => {
+        } else {
+          Object.entries(data.quotas || {}).forEach(([name, quota]) => {
             normalizedQuotas.push({
               name,
               used: quota.used || 0,
@@ -597,6 +597,21 @@ export function parseQuotaData(provider, data) {
               resetAt: quota.resetAt || null,
             });
           });
+          if (data.extraUsage?.is_enabled) {
+            const monthlyLimit = Number(data.extraUsage.monthly_limit) || 0;
+            const usedCredits = Number(data.extraUsage.used_credits) || 0;
+            const utilization = Number(data.extraUsage.utilization) || 0;
+            normalizedQuotas.push({
+              name: "extra usage",
+              used: usedCredits,
+              total: monthlyLimit,
+              creditBalance: Math.max(0, monthlyLimit - usedCredits),
+              remainingPercentage: Math.max(0, 100 - utilization),
+              resetAt: null,
+              isCreditBalance: true,
+              currency: data.extraUsage.currency || "USD",
+            });
+          }
         }
         break;
 

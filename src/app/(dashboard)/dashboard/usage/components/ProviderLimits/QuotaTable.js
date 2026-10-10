@@ -196,14 +196,14 @@ export default function QuotaTable({
                       isUnlimited
                         ? `${quota.used.toLocaleString()} used · Unlimited`
                         : isCreditBalance
-                        ? `Credit balance: ${quota.total.toFixed(2)} ${quota.currency || ""}`
+                        ? `Credit balance: ${(quota.creditBalance ?? quota.total).toFixed(2)} ${quota.currency || ""}`
                         : `${quota.used.toLocaleString()} / ${quota.total > 0 ? quota.total.toLocaleString() : "∞"}`
                     }
                   >
                     {isUnlimited
                       ? `${quota.used.toLocaleString()} used · Unlimited`
                       : isCreditBalance
-                      ? `Credit: ${quota.total.toFixed(2)} ${quota.currency || ""}`
+                      ? `Credit: ${(quota.creditBalance ?? quota.total).toFixed(2)} ${quota.currency || ""}`
                       : `${quota.used.toLocaleString()} / ${quota.total > 0 ? quota.total.toLocaleString() : "∞"}`}
                   </span>
                   <span className={`font-medium ${isUnlimited ? "text-green-600 dark:text-green-400" : isCreditBalance ? "text-blue-600 dark:text-blue-400" : colors.text} shrink-0`}>
