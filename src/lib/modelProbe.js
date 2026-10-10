@@ -20,9 +20,9 @@ export function classifyProbeResult({ ok = false, status = null, message = "", t
   if (finishReason === "content_filter" || CONTENT.test(text)) return "content_filtered";
   if (Number(status) === 429 || RATE_LIMIT.test(text)) return "rate_limited";
   if (Number(status) === 402 || QUOTA.test(text)) return "quota";
+  if ([400, 404, 406].includes(Number(status)) && MODEL_FAILURE.test(text)) return "hard_model_failure";
   if (Number(status) === 401 || (Number(status) === 403 && !CONTENT.test(text)) || AUTH.test(text)) return "auth_or_account";
   if (BOT_BLOCK.test(text)) return "inconclusive";
-  if ([400, 404, 406].includes(Number(status)) && MODEL_FAILURE.test(text)) return "hard_model_failure";
   if (networkError || [408, 425].includes(Number(status)) || Number(status) >= 500) return "transient_provider";
   return "inconclusive";
 }

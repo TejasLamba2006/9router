@@ -4,6 +4,7 @@ import { classifyProbeResult, parseRetryAfterMs, sanitizeProbeMessage } from "..
 describe("model probe classification", () => {
   it.each([
     [{ status: 404, message: "The model deployment 'gone' was not found" }, "hard_model_failure"],
+    [{ status: 404, message: '{"type":"invalid_request_error","code":"DeploymentNotFound","message":"The API deployment for this resource does not exist."}' }, "hard_model_failure"],
     [{ status: 400, message: "unknown model: gone" }, "hard_model_failure"],
     [{ status: 429, message: "rate limit exceeded" }, "rate_limited"],
     [{ status: 402, message: "insufficient credits" }, "quota"],
