@@ -17,4 +17,19 @@ describe("Playground dashboard wiring", () => {
     expect(header).toContain('pathname.includes("/basic-chat")');
     expect(header).toContain('title: "Playground"');
   });
+
+  it("wires model modes, settings, tools, files, and the protected dashboard gateway", () => {
+    const page = source("src/app/(dashboard)/dashboard/basic-chat/BasicChatPageClient.js");
+
+    expect(page).toContain("ModelSelectModal");
+    expect(page).toContain("PlaygroundModeTabs");
+    expect(page).toContain("PlaygroundSettingsDrawer");
+    expect(page).toContain("ConversationRail");
+    expect(page).toContain("ToolCallCard");
+    expect(page).toContain("preparePlaygroundAttachments");
+    expect(page).toContain("/api/dashboard/playground/");
+    expect(page).toContain("buildPlaygroundRequest");
+    expect(page).toContain("reduceStreamEvent");
+    expect(page).toContain("ConfirmModal");
+  });
 });
