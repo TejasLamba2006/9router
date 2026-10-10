@@ -24,4 +24,23 @@ describe("provider model batch UI wiring", () => {
     expect(hook).toContain('fetch("/api/models/test-batch"');
     expect(hook).toContain("connectionId: selectedConnectionId");
   });
+
+  it("separates row hide from confirmed bulk hide and syncs auto-hide immediately", () => {
+    const nativePage = source("src/app/(dashboard)/dashboard/providers/[id]/page.js");
+    const compatible = source("src/app/(dashboard)/dashboard/providers/[id]/CompatibleModelsSection.js");
+    const hook = source("src/app/(dashboard)/dashboard/providers/[id]/useModelBatchTest.js");
+    const toolbar = source("src/app/(dashboard)/dashboard/providers/[id]/ModelBatchToolbar.js");
+
+    expect(nativePage).toContain("onHideModel={handleDisableModel}");
+    expect(nativePage).toContain("onHideModels={handleDisableAll}");
+    expect(compatible).toContain("if (await onHideModel(id)) batch.removeSelected(id)");
+    expect(nativePage).toContain("modelBatch.removeSelected(modelId)");
+    expect(compatible).toContain("onHideShown={onHideModels}");
+    expect(hook).toContain("autoHideClassifications");
+    expect(hook).toContain("if (event.hidden)");
+    expect(hook).toContain("finally");
+    expect(toolbar).toContain("AUTO_HIDE_CLASSIFICATIONS");
+    expect(toolbar).toContain("Reset safe default");
+    expect(toolbar).toContain("Hides models permanently until unhidden");
+  });
 });

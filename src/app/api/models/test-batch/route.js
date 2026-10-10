@@ -2,7 +2,7 @@ import { getCustomModels, getProviderConnectionById, upsertModelCapabilityEviden
 import { runModelCapabilityProbeGroup } from "@/lib/modelCapabilityProbe";
 import { getModelsByProviderId } from "@/shared/constants/models";
 import { runModelProbe } from "@/lib/modelProbe";
-import { runModelTestBatch } from "@/lib/modelTestBatch";
+import { AUTO_HIDE_CLASSIFICATIONS, DEFAULT_AUTO_HIDE_CLASSIFICATIONS, runModelTestBatch } from "@/lib/modelTestBatch";
 import { disableCanonicalModels, getDisabledModelIds } from "@/sse/services/modelVisibility";
 
 const activeConnections = new Set();
@@ -22,6 +22,14 @@ function validateBody(body) {
   const cooldownMs = body.cooldownMs ?? 5000;
   if (!Number.isInteger(cooldownMs) || cooldownMs < 0 || cooldownMs > 60000) return "Invalid cooldownMs";
   if (body.verifyCapabilities !== undefined && typeof body.verifyCapabilities !== "boolean") return "Invalid verifyCapabilities";
+  if (body.autoHideHardFailures !== undefined && typeof body.autoHideHardFailures !== "boolean") return "Invalid autoHideHardFailures";
+  if (body.autoHideClassifications !== undefined) {
+    if (!Array.isArray(body.autoHideClassifications)
+      || body.autoHideClassifications.length > AUTO_HIDE_CLASSIFICATIONS.length
+      || body.autoHideClassifications.some((classification) => !AUTO_HIDE_CLASSIFICATIONS.includes(classification))) {
+      return "Invalid autoHideClassifications";
+    }
+  }
   return null;
 }
 
@@ -44,6 +52,9 @@ export async function POST(request) {
 
   const providerId = body.providerId.trim();
   const connectionId = body.connectionId.trim();
+  const autoHideClassifications = body.autoHideClassifications === undefined
+    ? (body.autoHideHardFailures === true ? [...DEFAULT_AUTO_HIDE_CLASSIFICATIONS] : [])
+    : [...new Set(body.autoHideClassifications)];
   const connection = await getProviderConnectionById(connectionId);
   if (!connection || connection.isActive === false || connection.provider !== providerId) {
     return Response.json({ error: "Selected connection does not match provider" }, { status: 400 });
@@ -84,7 +95,7 @@ export async function POST(request) {
         const result = await runModelTestBatch({
           models: modelIds,
           cooldownMs: body.cooldownMs ?? 5000,
-          autoHideHardFailures: body.autoHideHardFailures === true,
+          autoHideClassifications,
           signal: runController.signal,
           probe: async (model) => {
             const health = await runModelProbe({ provider: providerId, model, connectionId, signal: runController.signal, origin: "model_health" });
@@ -108,7 +119,14 @@ export async function POST(request) {
             return { ...health, capabilities };
           },
           hide: (model) => disableCanonicalModels(providerId, [model]),
-          onResult: (probeResult, index) => line(controller, { type: "result", index, done: index + 1, total: modelIds.length, result: probeResult }),
+          onResult: (probeResult, index, hideStatus) => line(controller, {
+            type: "result",
+            index,
+            done: index + 1,
+            total: modelIds.length,
+            result: probeResult,
+            ...hideStatus,
+          }),
           onWait: (delayMs, model, index) => line(controller, { type: "wait", delayMs, model, done: index + 1, total: modelIds.length }),
         });
         line(controller, { type: result.stopReason === "cancelled" ? "cancelled" : "done", stopReason: result.stopReason, done: result.results.length, total: modelIds.length });

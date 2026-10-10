@@ -266,9 +266,14 @@ export default function ProviderDetailPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ providerAlias: providerStorageAlias, ids: [modelId] }),
       });
-      if (res.ok) await fetchDisabledModels();
+      if (res.ok) {
+        modelBatch.removeSelected(modelId);
+        await fetchDisabledModels();
+      }
+      return res.ok;
     } catch (error) {
       console.log("Error disabling model:", error);
+      return false;
     }
   };
 
@@ -1129,6 +1134,7 @@ export default function ProviderDetailPage() {
           importing={refreshingModels}
           importMessage={refreshMsg}
           disabledModelIds={disabledModelIds}
+          onHideModel={handleDisableModel}
           onHideModels={handleDisableAll}
           onUnhideModels={async (ids) => {
             for (const id of ids) await handleEnableModel(id);

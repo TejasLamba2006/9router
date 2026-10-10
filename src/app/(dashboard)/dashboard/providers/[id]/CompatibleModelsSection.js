@@ -121,7 +121,7 @@ CompatibleModelRow.propTypes = {
   capabilityEvidence: PropTypes.object,
 };
 
-export default function CompatibleModelsSection({ providerStorageAlias, providerDisplayAlias, modelAliases, customModels, copied, onCopy, onDeleteAlias, onAddCustomModel, onDeleteCustomModel, connections, isAnthropic, onImportModels, importing, importMessage, disabledModelIds, onHideModels, onUnhideModels, onVisibilityChanged }) {
+export default function CompatibleModelsSection({ providerStorageAlias, providerDisplayAlias, modelAliases, customModels, copied, onCopy, onDeleteAlias, onAddCustomModel, onDeleteCustomModel, connections, isAnthropic, onImportModels, importing, importMessage, disabledModelIds, onHideModel, onHideModels, onUnhideModels, onVisibilityChanged }) {
   const [newModel, setNewModel] = useState("");
   const [adding, setAdding] = useState(false);
   const [query, setQuery] = useState("");
@@ -227,7 +227,9 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
                   testStatus={batch.results[id]?.ok === true ? "ok" : batch.results[id] ? "error" : undefined}
                   isTesting={batch.state?.running && batch.state.current === id && !batch.results[id]}
                   hidden={hidden}
-                  onHide={() => onHideModels([id])}
+                  onHide={async () => {
+                    if (await onHideModel(id)) batch.removeSelected(id);
+                  }}
                   onUnhide={() => onUnhideModels([id])}
                   selected={batch.selectedIds.includes(id)}
                   onToggleSelected={() => batch.toggleSelected(id)}
@@ -262,6 +264,7 @@ CompatibleModelsSection.propTypes = {
   importing: PropTypes.bool,
   importMessage: PropTypes.string,
   disabledModelIds: PropTypes.arrayOf(PropTypes.string).isRequired,
+  onHideModel: PropTypes.func.isRequired,
   onHideModels: PropTypes.func.isRequired,
   onUnhideModels: PropTypes.func.isRequired,
   onVisibilityChanged: PropTypes.func.isRequired,

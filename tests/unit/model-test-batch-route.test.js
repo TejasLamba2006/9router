@@ -103,7 +103,38 @@ describe("model test batch route", () => {
     expect(mocks.persist).not.toHaveBeenCalled();
   });
 
-  it("auto-hides only hard model failures", async () => {
+  it("validates configurable auto-hide classifications", async () => {
+    expect((await run({ providerId: "openai", connectionId: "conn-a", modelIds: ["a"], autoHideClassifications: "hard_model_failure" })).response.status).toBe(400);
+    expect((await run({ providerId: "openai", connectionId: "conn-a", modelIds: ["a"], autoHideClassifications: ["healthy"] })).response.status).toBe(400);
+    expect((await run({ providerId: "openai", connectionId: "conn-a", modelIds: ["a"], autoHideClassifications: Array(10).fill("timeout") })).response.status).toBe(400);
+    expect((await run({ providerId: "openai", connectionId: "conn-a", modelIds: ["a"], autoHideHardFailures: "yes" })).response.status).toBe(400);
+  });
+
+  it("auto-hides selected classifications and reports hidden immediately", async () => {
+    mocks.probe.mockResolvedValue({ modelId: "a", classification: "auth_or_account", ok: false, status: 401, latencyMs: 1, retryAfterMs: 0, message: "expired" });
+    const { events } = await run({
+      providerId: "openai", connectionId: "conn-a", modelIds: ["a"], cooldownMs: 0,
+      autoHideClassifications: ["auth_or_account", "auth_or_account"],
+    });
+    expect(mocks.disable).toHaveBeenCalledTimes(1);
+    expect(mocks.disable).toHaveBeenCalledWith("openai", ["a"]);
+    expect(events.find((event) => event.type === "result")).toMatchObject({
+      hidden: true,
+      hideAttempted: true,
+      hideFailed: false,
+    });
+  });
+
+  it("new auto-hide array overrides legacy hard-failure flag", async () => {
+    mocks.probe.mockResolvedValue({ modelId: "gone", classification: "hard_model_failure", ok: false, status: 404, latencyMs: 1, retryAfterMs: 0, message: "gone" });
+    await run({
+      providerId: "openai", connectionId: "conn-a", modelIds: ["gone"], cooldownMs: 0,
+      autoHideClassifications: [], autoHideHardFailures: true,
+    });
+    expect(mocks.disable).not.toHaveBeenCalled();
+  });
+
+  it("keeps legacy hard-failure auto-hide working", async () => {
     mocks.probe.mockResolvedValue({ modelId: "gone", classification: "hard_model_failure", ok: false, status: 404, latencyMs: 1, retryAfterMs: 0, message: "gone" });
     await run({ providerId: "openai", connectionId: "conn-a", modelIds: ["gone"], cooldownMs: 0, autoHideHardFailures: true });
     expect(mocks.disable).toHaveBeenCalledWith("openai", ["gone"]);

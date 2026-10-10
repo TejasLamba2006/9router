@@ -2,12 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { consumeModelBatchStream } from "@/shared/utils/modelBatchClient.js";
+import { DEFAULT_AUTO_HIDE_CLASSIFICATIONS } from "@/lib/modelTestBatch.js";
 
 export default function useModelBatchTest({ providerId, connections, onVisibilityChanged }) {
   const [selectedIds, setSelectedIds] = useState([]);
   const [connectionId, setConnectionId] = useState("");
   const [cooldownSeconds, setCooldownSeconds] = useState("5");
-  const [autoHide, setAutoHide] = useState(true);
+  const [autoHideClassifications, setAutoHideClassifications] = useState(() => [...DEFAULT_AUTO_HIDE_CLASSIFICATIONS]);
   const [verifyCapabilities, setVerifyCapabilities] = useState(false);
   const [state, setState] = useState(null);
   const [results, setResults] = useState({});
@@ -28,6 +29,13 @@ export default function useModelBatchTest({ providerId, connections, onVisibilit
   }, [providerId]);
 
   useEffect(() => () => abortRef.current?.abort(), []);
+  useEffect(() => {
+    Promise.resolve().then(() => {
+      setSelectedIds([]);
+      setResults({});
+      setConnectionId("");
+    });
+  }, [providerId]);
   useEffect(() => {
     const selectedConnectionId = connectionId || defaultConnectionId;
     if (!selectedConnectionId) return;
@@ -52,7 +60,7 @@ export default function useModelBatchTest({ providerId, connections, onVisibilit
           connectionId: selectedConnectionId,
           modelIds,
           cooldownMs: Math.round(cooldown * 1000),
-          autoHideHardFailures: autoHide,
+          autoHideClassifications,
           verifyCapabilities,
         }),
         signal: controller.signal,
@@ -61,7 +69,16 @@ export default function useModelBatchTest({ providerId, connections, onVisibilit
       await consumeModelBatchStream(response.body, (event) => {
         if (event.type === "result") {
           setResults((previous) => ({ ...previous, [event.result.modelId]: event.result }));
-          setState((previous) => ({ ...previous, done: event.done, current: event.result.modelId }));
+          setState((previous) => ({
+            ...previous,
+            done: event.done,
+            current: event.result.modelId,
+            error: event.hideFailed ? `Failed to hide ${event.result.modelId}` : previous?.error,
+          }));
+          if (event.hidden) {
+            setSelectedIds((previous) => previous.filter((id) => id !== event.result.modelId));
+            Promise.resolve().then(() => onVisibilityChanged?.());
+          }
         } else if (event.type === "wait") {
           setState((previous) => ({ ...previous, done: event.done, current: modelIds[event.done] || "" }));
         } else if (event.type === "done" || event.type === "cancelled") {
@@ -70,10 +87,10 @@ export default function useModelBatchTest({ providerId, connections, onVisibilit
           throw new Error(event.error);
         }
       });
-      await Promise.all([onVisibilityChanged?.(), refreshCapabilityEvidence(selectedConnectionId)]);
     } catch (error) {
       if (error?.name !== "AbortError") setState((previous) => ({ ...previous, running: false, error: error.message }));
     } finally {
+      await Promise.all([onVisibilityChanged?.(), refreshCapabilityEvidence(selectedConnectionId)]);
       if (abortRef.current === controller) abortRef.current = null;
       setState((previous) => previous ? { ...previous, running: false } : previous);
     }
@@ -82,18 +99,20 @@ export default function useModelBatchTest({ providerId, connections, onVisibilit
   const toggleSelected = (modelId) => setSelectedIds((previous) => (
     previous.includes(modelId) ? previous.filter((id) => id !== modelId) : [...previous, modelId]
   ));
+  const removeSelected = (modelId) => setSelectedIds((previous) => previous.filter((id) => id !== modelId));
 
   return {
     activeConnections,
     selectedIds,
     setSelectedIds,
     toggleSelected,
+    removeSelected,
     connectionId,
     setConnectionId,
     cooldownSeconds,
     setCooldownSeconds,
-    autoHide,
-    setAutoHide,
+    autoHideClassifications,
+    setAutoHideClassifications,
     verifyCapabilities,
     setVerifyCapabilities,
     state,
