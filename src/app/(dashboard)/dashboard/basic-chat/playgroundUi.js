@@ -209,7 +209,7 @@ export function normalizeLoadedSession(raw) {
     messages: (Array.isArray(raw?.messages) ? raw.messages : []).map((m) => ({
       id: m.id || newId(),
       ...m,
-      ...(m.status === "streaming" ? { status: "stopped" } : {}),
+      ...(["streaming", "running"].includes(m.status) ? { status: "stopped" } : {}),
     })),
   };
 }

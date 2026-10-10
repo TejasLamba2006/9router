@@ -372,6 +372,13 @@ export default function BasicChatPageClient() {
             ? { ...message, status: "error", error: errorText(error) }
             : message),
         }));
+      } else {
+        setSessions((current) => current.map((item) => item.id !== sessionId ? item : {
+          ...item,
+          messages: item.messages.map((message) => message.status === "streaming" || message.status === "running"
+            ? { ...message, status: "stopped" }
+            : message),
+        }));
       }
     } finally {
       if (abortRef.current === controller) abortRef.current = null;

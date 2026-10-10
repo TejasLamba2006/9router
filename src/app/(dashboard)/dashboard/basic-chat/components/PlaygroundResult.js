@@ -64,10 +64,10 @@ export default function PlaygroundResult({ message, pendingCallIds, onToolResult
           const src = safeMediaSrc(image.src);
           return src ? (
             <figure key={`${src}-${index}`} className="overflow-hidden rounded-xl border border-border bg-surface-2">
-              <Image src={src} alt={image.revisedPrompt || `Generated image ${index + 1}`} width={1024} height={1024} unoptimized className="h-auto w-full object-contain" />
+              <Image src={src} alt={image.revisedPrompt || `Generated image ${index + 1}`} width={1024} height={1024} unoptimized crossOrigin="anonymous" referrerPolicy="no-referrer" className="h-auto w-full object-contain" />
               <figcaption className="flex items-center justify-between gap-2 p-2 text-xs text-text-muted">
                 <span className="line-clamp-2">{image.revisedPrompt || `Image ${index + 1}`}</span>
-                <a href={src} download={`playground-image-${index + 1}`} className="text-primary hover:underline">Download</a>
+                <a href={src} download={`playground-image-${index + 1}`} referrerPolicy="no-referrer" className="text-primary hover:underline">Download</a>
               </figcaption>
             </figure>
           ) : null;
@@ -78,7 +78,7 @@ export default function PlaygroundResult({ message, pendingCallIds, onToolResult
 
   if (result.kind === "audio") {
     const src = safeMediaSrc(result.src);
-    return src ? <div className="space-y-2"><audio src={src} controls className="w-full" /><a href={src} download="playground-audio" className="text-sm text-primary hover:underline">Download audio</a></div> : null;
+    return src ? <div className="space-y-2"><audio src={src} controls crossOrigin="anonymous" className="w-full" /><a href={src} download="playground-audio" referrerPolicy="no-referrer" className="text-sm text-primary hover:underline">Download audio</a></div> : null;
   }
 
   if (result.kind === "text") return <p className="whitespace-pre-wrap break-words text-[15px] leading-7 text-text-main">{result.text}</p>;
@@ -98,7 +98,7 @@ export default function PlaygroundResult({ message, pendingCallIds, onToolResult
         <p className="text-sm text-text-muted">Status: {result.status}</p>
         {result.videos.map((video, index) => {
           const src = safeMediaSrc(video);
-          return src ? <div key={`${src}-${index}`} className="space-y-2"><video src={src} controls className="max-h-[32rem] w-full rounded-xl bg-black" /><a href={src} download={`playground-video-${index + 1}`} className="text-sm text-primary hover:underline">Download video</a></div> : null;
+          return src ? <div key={`${src}-${index}`} className="space-y-2"><video src={src} controls crossOrigin="anonymous" className="max-h-[32rem] w-full rounded-xl bg-black" /><a href={src} download={`playground-video-${index + 1}`} referrerPolicy="no-referrer" className="text-sm text-primary hover:underline">Download video</a></div> : null;
         })}
       </div>
     );

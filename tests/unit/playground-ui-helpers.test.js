@@ -234,9 +234,12 @@ describe("normalizeLoadedSession", () => {
     expect(s.messages).toHaveLength(1);
   });
 
-  it("marks a reload-interrupted stream as stopped instead of streaming forever", () => {
-    const s = normalizeLoadedSession({ id: "y", mode: "chat", messages: [{ role: "assistant", content: "par", status: "streaming" }] });
-    expect(s.messages[0].status).toBe("stopped");
+  it("marks reload-interrupted requests as stopped instead of running forever", () => {
+    const s = normalizeLoadedSession({ id: "y", mode: "chat", messages: [
+      { role: "assistant", content: "par", status: "streaming" },
+      { role: "assistant", content: "", status: "running" },
+    ] });
+    expect(s.messages.map((message) => message.status)).toEqual(["stopped", "stopped"]);
   });
 });
 
