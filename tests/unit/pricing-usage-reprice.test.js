@@ -142,6 +142,18 @@ describe("pricing mutations reprice historical usage", () => {
 });
 
 describe("pricing route model batch", () => {
+  it("rejects prototype keys before mutating pricing", async () => {
+    const route = await import("../../src/app/api/pricing/route.js");
+    const res = await route.PATCH(new Request("http://x/api/pricing", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: '{"__proto__":{"polluted":{"input":1,"output":1}}}',
+    }));
+
+    expect(res.status).toBe(400);
+    expect({}.polluted).toBeUndefined();
+  });
+
   it("GET ?provider&models returns resolved rates and source per model", async () => {
     const route = await import("../../src/app/api/pricing/route.js");
     await db.updatePricing({ openai: { "gpt-4o": { input: 1, output: 2 } } });

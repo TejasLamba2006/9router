@@ -5,6 +5,7 @@ import { getCatalogRevision, getCatalogSnapshot } from "open-sse/providers/catal
 import { buildPricingView } from "@/lib/pricingView.js";
 
 const MAX_MODEL_BATCH = 1000;
+const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 async function getPricingView() {
   const manual = await getManualPricing();
@@ -61,6 +62,9 @@ export async function PATCH(request) {
 
     // Validate pricing structure
     for (const [provider, models] of Object.entries(body)) {
+      if (UNSAFE_KEYS.has(provider)) {
+        return NextResponse.json({ error: `Invalid provider: ${provider}` }, { status: 400 });
+      }
       if (typeof models !== "object" || models === null) {
         return NextResponse.json(
           { error: `Invalid pricing for provider: ${provider}` },
@@ -69,6 +73,9 @@ export async function PATCH(request) {
       }
 
       for (const [model, pricing] of Object.entries(models)) {
+        if (UNSAFE_KEYS.has(model)) {
+          return NextResponse.json({ error: `Invalid model: ${model}` }, { status: 400 });
+        }
         if (typeof pricing !== "object" || pricing === null) {
           return NextResponse.json(
             { error: `Invalid pricing for model: ${provider}/${model}` },
