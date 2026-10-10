@@ -196,10 +196,11 @@ describe("Claude extra-usage credits", () => {
       quotas: {},
       extraUsage: {
         is_enabled: true,
-        monthly_limit: 25,
-        used_credits: 7.5,
+        monthly_limit: 2500,
+        used_credits: 750,
         utilization: 30,
         currency: "USD",
+        decimal_places: 2,
       },
     });
 

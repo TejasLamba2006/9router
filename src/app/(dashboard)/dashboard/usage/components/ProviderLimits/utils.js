@@ -602,8 +602,10 @@ export function parseQuotaData(provider, data) {
             extraUsage?.is_enabled
             || (extraUsage?.credits_ever_enabled && extraUsage?.disabled_reason === "out_of_credits")
           ) {
-            const monthlyLimit = Number(extraUsage.monthly_limit) || 0;
-            const usedCredits = Number(extraUsage.used_credits) || 0;
+            const decimalPlaces = Math.max(0, Number(extraUsage.decimal_places) || 0);
+            const creditScale = 10 ** decimalPlaces;
+            const monthlyLimit = (Number(extraUsage.monthly_limit) || 0) / creditScale;
+            const usedCredits = (Number(extraUsage.used_credits) || 0) / creditScale;
             const utilization = Number(extraUsage.utilization);
             const isOutOfCredits = extraUsage.is_enabled === false
               && extraUsage.disabled_reason === "out_of_credits";
