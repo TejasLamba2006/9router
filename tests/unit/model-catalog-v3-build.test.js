@@ -40,6 +40,28 @@ describe("model catalog v3 transform", () => {
     expect(result.uniqueCanonicalBasename["gpt-x"]).toBe("openai/gpt-x");
   });
 
+  it("maps declared output modalities without confusing them with inputs", () => {
+    const result = build({
+      openai: {
+        models: {
+          "multimodal-output": {
+            modalities: {
+              input: ["text", "audio"],
+              output: ["text", "image", "audio", "video"],
+            },
+          },
+        },
+      },
+    }, []);
+
+    expect(result.models["openai:multimodal-output"]).toEqual({
+      audioInput: true,
+      imageOutput: true,
+      audioOutput: true,
+      videoOutput: true,
+    });
+  });
+
   it("derives canonical owner IDs when models.dev omits canonical_model_id", () => {
     const result = build({
       openai: {

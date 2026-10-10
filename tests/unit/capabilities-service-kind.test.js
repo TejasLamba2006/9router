@@ -11,5 +11,6 @@ describe("capabilitiesFromServiceKind", () => {
     expect(capabilitiesFromServiceKind("image")).toMatchObject({ imageOutput: true });
     expect(capabilitiesFromServiceKind("stt")).toMatchObject({ audioInput: true });
     expect(capabilitiesFromServiceKind("tts")).toMatchObject({ audioOutput: true });
+    expect(capabilitiesFromServiceKind("video")).toMatchObject({ videoOutput: true });
   });
 });

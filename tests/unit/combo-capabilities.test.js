@@ -60,6 +60,22 @@ describe("aggregateComboCapabilities — union fields (vision, audioInput, searc
   });
 });
 
+describe("aggregateComboCapabilities — output modality union", () => {
+  it("unions image, audio and video output capabilities", () => {
+    const caps = aggregateComboCapabilities(
+      ["one", "two", "three"],
+      null,
+      (model) => ({
+        one: { imageOutput: true },
+        two: { audioOutput: true },
+        three: { videoOutput: true },
+      })[model],
+    );
+
+    expect(caps).toMatchObject({ imageOutput: true, audioOutput: true, videoOutput: true });
+  });
+});
+
 describe("aggregateComboCapabilities — intersection: tools", () => {
   it("tools is false if any backend lacks it", () => {
     // gpt-image-1: tools:false; gpt-5: tools:true

@@ -47,6 +47,11 @@ function resolveCaps(byFull, byId, key) {
   const c = getCapabilitiesForModel(provider, bare);
   return {
     vision: c.vision,
+    audioInput: c.audioInput,
+    videoInput: c.videoInput,
+    imageOutput: c.imageOutput,
+    audioOutput: c.audioOutput,
+    videoOutput: c.videoOutput,
     search: c.search,
     reasoning: c.reasoning,
     contextWindow: c.contextWindow,

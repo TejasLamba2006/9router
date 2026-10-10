@@ -51,6 +51,7 @@ export const DEFAULT_CAPABILITIES = {
   // output modalities
   imageOutput: false,   // generate images
   audioOutput: false,   // generate audio
+  videoOutput: false,   // generate video
   // features
   search: false,        // built-in web search tool / grounding
   tools: true,          // function / tool calling
@@ -74,6 +75,7 @@ const SERVICE_KIND_CAPABILITIES = {
   image: { imageOutput: true },
   stt: { audioInput: true },
   tts: { audioOutput: true },
+  video: { videoOutput: true },
   embedding: { tools: false },
 };
 
@@ -552,6 +554,7 @@ export function aggregateComboCapabilities(comboModels, comboLookup = null, reso
     videoInput:  allCaps.some((c) => c.videoInput),
     imageOutput: allCaps.some((c) => c.imageOutput),
     audioOutput: allCaps.some((c) => c.audioOutput),
+    videoOutput: allCaps.some((c) => c.videoOutput),
     search:      allCaps.some((c) => c.search),
     tools:       allCaps.every((c) => c.tools),
     reasoning:          first.reasoning,
@@ -571,7 +574,7 @@ export function aggregateComboCapabilities(comboModels, comboLookup = null, reso
  * @param {string} model
  * @returns {object} full capabilities object
  */
-const MODALITY_KEYS = ["vision", "pdf", "audioInput", "videoInput"];
+const MODALITY_KEYS = ["vision", "pdf", "audioInput", "videoInput", "imageOutput", "audioOutput", "videoOutput"];
 
 // Catalog lookups, installed by the server at startup. Left as no-ops in the
 // browser bundle, where there is no file to read.
