@@ -4,6 +4,7 @@ import { getKeyAccessContext, filterModelsListForKey } from "@/sse/services/keyA
 // URL slug → service kind(s). `web` covers both webSearch and webFetch.
 const KIND_SLUG_MAP = {
   "image": ["image"],
+  "video": ["video"],
   "tts": ["tts"],
   "stt": ["stt"],
   "embedding": ["embedding"],
@@ -36,7 +37,7 @@ function json(data, options = {}) {
 /**
  * GET /v1/models/{kind} - OpenAI-compatible models list filtered by capability.
  * GET /v1/models/{provider}/{model} - OpenAI-compatible single model lookup.
- * Supported kinds: image, tts, stt, embedding, image-to-text, web.
+ * Supported kinds: image, video, tts, stt, embedding, image-to-text, web.
  */
 export async function GET(request, { params }) {
   try {

@@ -84,15 +84,6 @@ export default function ModelSelectModal({
   addedModelValues = [],
   closeOnSelect = true,
 }) {
-  // Filter activeProviders by serviceKinds when kindFilter set (e.g. "webSearch", "webFetch")
-  const filteredActiveProviders = useMemo(() => {
-    if (!kindFilter) return activeProviders;
-    return activeProviders.filter((p) => {
-      const info = AI_PROVIDERS[p.provider];
-      const kinds = info?.serviceKinds || ["llm"];
-      return kinds.includes(kindFilter);
-    });
-  }, [activeProviders, kindFilter]);
   const { getCaps } = useModelCaps();
   const [searchQuery, setSearchQuery] = useState("");
   const [combos, setCombos] = useState([]);
@@ -153,6 +144,20 @@ export default function ModelSelectModal({
     if (isOpen) fetchProviderNodes();
   }, [isOpen]);
 
+  // Registry providers declare serviceKinds statically. Compatible nodes may
+  // declare them on the node or connection metadata instead.
+  const filteredActiveProviders = useMemo(() => {
+    if (!kindFilter) return activeProviders;
+    return activeProviders.filter((connection) => {
+      const matchedNode = providerNodes.find((node) => node.id === connection.provider);
+      const kinds = matchedNode?.serviceKinds
+        || connection.providerSpecificData?.serviceKinds
+        || AI_PROVIDERS[connection.provider]?.serviceKinds
+        || ["llm"];
+      return kinds.includes(kindFilter);
+    });
+  }, [activeProviders, providerNodes, kindFilter]);
+
   const fetchCustomModels = async () => {
     try {
       const res = await fetch("/api/models/custom");
@@ -194,7 +199,7 @@ export default function ModelSelectModal({
     // Kinds where the provider IS the model (no per-model selection needed)
     const PROVIDER_AS_MODEL_KINDS = new Set(["webSearch", "webFetch"]);
     // Kinds that map directly to model.type field
-    const TYPED_KINDS = new Set(["image", "tts", "stt", "embedding", "imageToText"]);
+    const TYPED_KINDS = new Set(["image", "video", "tts", "stt", "embedding", "imageToText"]);
     // For these kinds, providers without hardcoded models can still be picked (provider-as-model fallback)
     const ALLOW_PROVIDER_FALLBACK_KINDS = new Set(["tts", "image", "webFetch"]);
 
@@ -316,8 +321,6 @@ export default function ModelSelectModal({
           };
         }
       } else if (isCustomProvider) {
-        // Custom (openai/anthropic-compatible) providers are LLM-only — skip for typed media kinds
-        if (kindFilter && TYPED_KINDS.has(kindFilter)) return;
         // Find connection object to get prefix synchronously without waiting for providerNodes fetch
         const connection = activeProviders.find(p => p.provider === providerId);
         const matchedNode = providerNodes.find(node => node.id === providerId);
@@ -334,27 +337,33 @@ export default function ModelSelectModal({
             value: `${nodePrefix}/${fullModel.replace(`${providerId}/`, "")}`,
           }));
 
-        // Merge custom models registered via /api/models/custom for this provider
-        // providerAlias in DB uses the raw providerId, not the display prefix
+        // Merge custom models registered via /api/models/custom for this provider.
+        // Their declared kind controls typed media selectors.
         const registeredCustom = customModels
           .filter((m) => m.providerAlias === providerId)
           .map((m) => ({
             id: m.id,
             name: m.name || m.id,
             value: `${nodePrefix}/${m.id}`,
+            kind: getModelKind(m),
             isCustom: true,
           }));
-        const seen = new Set(nodeModels.map((m) => m.value));
-        const mergedModels = [...nodeModels, ...registeredCustom.filter((m) => !seen.has(m.value))];
+        const typedCustom = kindFilter && TYPED_KINDS.has(kindFilter)
+          ? registeredCustom.filter((m) => getModelKind(m) === kindFilter)
+          : registeredCustom.filter((m) => !getModelKind(m) || getModelKind(m) === "llm");
+        const baseModels = kindFilter && TYPED_KINDS.has(kindFilter) ? [] : nodeModels;
+        const seen = new Set(baseModels.map((m) => m.value));
+        const mergedModels = [...baseModels, ...typedCustom.filter((m) => !seen.has(m.value))];
 
-        // Always show compatible providers that are connected, even with no aliases.
-        // When no aliases exist, show a placeholder so users know it's available.
-        const modelsToShow = mergedModels.length > 0 ? mergedModels : [{
+        // The placeholder is only useful for chat, where compatible providers
+        // can accept arbitrary model IDs. Typed selectors require a declared model.
+        const modelsToShow = mergedModels.length > 0 ? mergedModels : kindFilter ? [] : [{
           id: `__placeholder__${providerId}`,
           name: `${nodePrefix}/model-id`,
           value: `${nodePrefix}/model-id`,
           isPlaceholder: true,
         }];
+        if (modelsToShow.length === 0) return;
 
         groups[providerId] = {
           name: displayName,

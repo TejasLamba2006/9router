@@ -25,18 +25,7 @@ export async function GET() {
         fullModel,
         routedModel,
         alias: modelAliases[fullModel] || m.model,
-        caps: {
-          vision: c.vision,
-          audioInput: c.audioInput,
-          videoInput: c.videoInput,
-          imageOutput: c.imageOutput,
-          audioOutput: c.audioOutput,
-          videoOutput: c.videoOutput,
-          search: c.search,
-          reasoning: c.reasoning,
-          contextWindow: c.contextWindow,
-          maxOutput: c.maxOutput,
-        },
+        caps: { ...c },
       };
     });
 
@@ -58,16 +47,7 @@ export async function GET() {
         routedModel: fullModel,
         alias: modelAliases[fullModel] || m.id,
         caps: {
-          vision: c.vision,
-          audioInput: c.audioInput,
-          videoInput: c.videoInput,
-          imageOutput: c.imageOutput,
-          audioOutput: c.audioOutput,
-          videoOutput: c.videoOutput,
-          search: c.search,
-          reasoning: c.reasoning,
-          contextWindow: c.contextWindow,
-          maxOutput: c.maxOutput,
+          ...c,
           ...(m.caps || {}),
         },
       });

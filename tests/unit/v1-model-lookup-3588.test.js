@@ -45,15 +45,18 @@ describe("GET /v1/models/{id}", () => {
     expect(await response.json()).toEqual(chatModel);
   });
 
-  it("keeps capability-list routes unchanged", async () => {
-    const imageModel = { id: "image/gpt-image-1", object: "model", owned_by: "image" };
-    mocks.buildModelsList.mockResolvedValue([imageModel]);
+  it.each([
+    ["image", "image"],
+    ["video", "video"],
+  ])("keeps the %s capability-list route", async (slug, kind) => {
+    const mediaModel = { id: `${kind}/model-1`, object: "model", owned_by: kind };
+    mocks.buildModelsList.mockResolvedValue([mediaModel]);
 
-    const response = await GET(new Request("https://router.test/v1/models/image"), params(["image"]));
+    const response = await GET(new Request(`https://router.test/v1/models/${slug}`), params([slug]));
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ object: "list", data: [imageModel] });
-    expect(mocks.buildModelsList).toHaveBeenCalledWith(["image"]);
+    expect(await response.json()).toEqual({ object: "list", data: [mediaModel] });
+    expect(mocks.buildModelsList).toHaveBeenCalledWith([kind]);
   });
 
   it("returns an OpenAI-style model_not_found response for an unknown model", async () => {
