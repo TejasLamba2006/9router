@@ -40,6 +40,9 @@ describe("provider model batch UI wiring", () => {
     expect(hook).toContain("if (event.hidden)");
     expect(hook).toContain("finally");
     expect(toolbar).toContain("AUTO_HIDE_CLASSIFICATIONS");
+    expect(toolbar).toContain("grid-cols-2");
+    expect(toolbar).toContain("backdrop-blur-xl");
+    expect(toolbar).toContain("bg-surface/80");
     expect(toolbar).toContain("Reset safe default");
     expect(toolbar).toContain("Hides models permanently until unhidden");
   });

@@ -78,21 +78,21 @@ export default function ModelBatchToolbar({ batch, shownIds }) {
           Auto-hide: {batch.autoHideClassifications.length}
         </button>
         {hideMenuOpen && (
-          <div className="absolute left-0 top-full z-50 mt-1 min-w-[250px] rounded-lg border border-border bg-bg p-2 shadow-lg">
+          <div className="absolute left-0 top-full z-50 mt-1 w-[min(480px,calc(100vw-2rem))] rounded-xl border border-border/60 bg-surface/80 p-3 shadow-xl shadow-black/10 backdrop-blur-xl dark:bg-surface/70">
             <div className="flex items-center justify-between border-b border-border pb-2">
               <button type="button" disabled={batch.state?.running} onClick={() => batch.setAutoHideClassifications([])} className="text-text-muted hover:text-primary disabled:opacity-50">None</button>
               <button type="button" disabled={batch.state?.running} onClick={() => batch.setAutoHideClassifications([...DEFAULT_AUTO_HIDE_CLASSIFICATIONS])} className="text-primary hover:underline disabled:opacity-50">Reset safe default</button>
             </div>
-            <div className="mt-2 flex flex-col gap-1.5">
+            <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2">
               {AUTO_HIDE_CLASSIFICATIONS.map((classification) => (
-                <label key={classification} className="flex items-center gap-2 whitespace-nowrap">
+                <label key={classification} className="flex min-w-0 items-center gap-2">
                   <input
                     type="checkbox"
                     checked={batch.autoHideClassifications.includes(classification)}
                     onChange={() => toggleClassification(classification)}
                     disabled={batch.state?.running}
                   />
-                  {CLASSIFICATION_LABELS[classification]}
+                  <span className="truncate">{CLASSIFICATION_LABELS[classification]}</span>
                 </label>
               ))}
             </div>
