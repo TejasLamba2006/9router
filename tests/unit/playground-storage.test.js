@@ -183,17 +183,22 @@ describe("migrateBasicChatSessions", () => {
 describe("reference cleanup and eviction", () => {
   const session = (id, ids) => ({ id, messages: [{ id: `${id}m`, attachments: ids.map((a) => ({ id: a })) }] });
 
-  it("collects attachment ids across sessions", () => {
-    expect([...collectAttachmentIds([session("s1", ["a", "b"]), session("s2", ["c"])])].sort()).toEqual(["a", "b", "c"]);
+  it("collects attachment and generated-output blob ids across sessions", () => {
+    const sessions = [
+      session("s1", ["a", "b"]),
+      { id: "s2", messages: [{ attachments: [{ id: "c" }], result: { blobId: "audio", images: [{ blobId: "image" }] } }] },
+    ];
+    expect([...collectAttachmentIds(sessions)].sort()).toEqual(["a", "audio", "b", "c", "image"]);
   });
 
-  it("releases only blobs no other session references", async () => {
+  it("releases only blobs no other session or pending composer references", async () => {
     const store = createMemoryBlobStore();
-    for (const id of ["a", "b"]) await store.put(id, blob(id));
-    const deleted = await releaseSessionBlobs({ blobStore: store, session: session("s1", ["a", "b"]), remainingSessions: [session("s2", ["b"])] });
+    for (const id of ["a", "b", "c"]) await store.put(id, blob(id));
+    const deleted = await releaseSessionBlobs({ blobStore: store, session: session("s1", ["a", "b", "c"]), remainingSessions: [session("s2", ["b"])], keepIds: ["c"] });
     expect(deleted).toEqual(["a"]);
     expect(await store.get("a")).toBeNull();
     expect(await store.get("b")).not.toBeNull();
+    expect(await store.get("c")).not.toBeNull();
   });
 
   it("evicts oldest unreferenced blobs until under budget, never referenced ones", async () => {

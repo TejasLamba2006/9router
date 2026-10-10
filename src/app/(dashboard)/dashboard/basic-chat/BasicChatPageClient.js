@@ -1,967 +1,553 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Badge, Button } from "@/shared/components";
-import { getModelsByProviderId } from "@/shared/constants/models";
-import { isAnthropicCompatibleProvider, isOpenAICompatibleProvider } from "@/shared/constants/providers";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Button, ConfirmModal, ModelSelectModal } from "@/shared/components";
+import { useModelCaps } from "@/shared/hooks/useModelCaps";
+import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
+import {
+  buildPlaygroundRequest,
+  buildToolResultMessage,
+  buildVideoPollRequest,
+  createStreamState,
+  normalizeResponse,
+  parseAdvancedJson,
+  reduceSseBuffer,
+  toFormData,
+} from "@/shared/utils/playgroundRequest";
+import {
+  BLOB_BUDGET_BYTES,
+  evictBlobs,
+  loadSessions,
+  migrateBasicChatSessions,
+  openBlobStore,
+  releaseSessionBlobs,
+  saveSessions,
+} from "@/shared/utils/playgroundStorage";
+import ConversationRail from "./components/ConversationRail";
+import PlaygroundModeTabs from "./components/PlaygroundModeTabs";
+import PlaygroundResult from "./components/PlaygroundResult";
+import PlaygroundSettingsDrawer from "./components/PlaygroundSettingsDrawer";
+import {
+  applyToolResult,
+  createSession,
+  needsConfirmation,
+  newId,
+  normalizeLoadedSession,
+  parseToolsJson,
+  pendingToolCalls,
+  pendingVideoJobs,
+  persistGeneratedResult,
+  preparePlaygroundAttachments,
+  primaryInputForMode,
+  sessionTitle,
+  tabFor,
+  toApiMessages,
+  trimTrailingAssistant,
+  toDashboardPath,
+  toolContinuationMessageId,
+  trimFromUserMessage,
+  validateChatAttachments,
+} from "./playgroundUi";
 
-const STORAGE_KEYS = {
-  sessions: "basic-chat.sessions",
-  activeSessionId: "basic-chat.activeSessionId",
-  activeProviderId: "basic-chat.activeProviderId",
-  draft: "basic-chat.draft",
-};
+const ACTIVE_SESSION_KEY = "playground.v1.activeSessionId";
+const POLL_DELAYS = [1500, 2500, 4000, 6000, 10000];
 
-function createId() {
-  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
-  return `chat_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-}
-
-function safeParse(value, fallback) {
-  try {
-    return JSON.parse(value);
-  } catch {
-    return fallback;
-  }
-}
-
-function textValue(value) {
+function errorText(value) {
   if (typeof value === "string") return value;
-  if (value == null) return "";
-  if (Array.isArray(value)) return value.map(textValue).filter(Boolean).join(" ");
-  if (typeof value === "object") {
-    if (typeof value.message === "string") return value.message;
-    if (typeof value.error === "string") return value.error;
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return String(value);
-    }
-  }
-  return String(value);
+  return value?.error?.message || value?.error || value?.message || "Request failed";
 }
 
-function humanize(value = "") {
-  return String(value)
-    .replace(/[-_]/g, " ")
-    .replace(/\b\w/g, (char) => char.toUpperCase())
-    .trim() || "Unknown";
+async function parseError(response) {
+  const raw = await response.text().catch(() => "");
+  let body = raw;
+  try { body = raw ? JSON.parse(raw) : ""; } catch {}
+  return errorText(body) || `Request failed (${response.status})`;
 }
 
-function formatRelativeTime(value) {
-  if (!value) return "Now";
-  const time = new Date(value).getTime();
-  if (Number.isNaN(time)) return "Now";
-  const diffMinutes = Math.max(1, Math.round((Date.now() - time) / 60000));
-  if (diffMinutes < 60) return `${diffMinutes}m`;
-  const diffHours = Math.round(diffMinutes / 60);
-  if (diffHours < 24) return `${diffHours}h`;
-  return `${Math.round(diffHours / 24)}d`;
-}
-
-function makeSessionTitle(text = "") {
-  const normalized = textValue(text).replace(/\s+/g, " ").trim();
-  if (!normalized) return "New chat";
-  return normalized.length > 52 ? `${normalized.slice(0, 52).trimEnd()}…` : normalized;
-}
-
-function buildUserContent(message) {
-  const text = textValue(message.content).trim();
-  const attachments = Array.isArray(message.attachments) ? message.attachments : [];
-
-  if (attachments.length === 0) return text;
-
-  const content = [];
-  if (text) content.push({ type: "text", text });
-
-  for (const attachment of attachments) {
-    if (attachment?.dataUrl) {
-      content.push({ type: "image_url", image_url: { url: attachment.dataUrl } });
-    }
-  }
-
-  return content.length > 0 ? content : text;
-}
-
-function readAssistantText(chunk) {
-  if (!chunk || typeof chunk !== "object") return "";
-  const choice = chunk.choices?.[0];
-  const delta = choice?.delta || {};
-  const pieces = [delta.content, choice?.message?.content, chunk.output_text, chunk.text]
-    .map(textValue)
-    .filter(Boolean);
-  return pieces[0] || "";
-}
-
-async function fileToDataUrl(file) {
+async function blobToDataUrl(blob) {
   return await new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(reader.error || new Error("Failed to read file"));
-    reader.readAsDataURL(file);
+    reader.onerror = () => reject(reader.error || new Error("Could not read attachment"));
+    reader.readAsDataURL(blob);
   });
 }
 
-function cloneSession(session) {
-  return {
-    ...session,
-    messages: Array.isArray(session.messages) ? session.messages.map((message) => ({ ...message })) : [],
-  };
+
+function inputPlaceholder(mode) {
+  if (mode === "image") return "Describe an image to generate";
+  if (mode === "tts") return "Text to speak";
+  if (mode === "stt") return "Attach one audio file";
+  if (mode === "embedding") return "Text to embed";
+  if (mode === "video") return "Describe a video to generate";
+  return "Message model";
 }
 
-function getProviderLabel(connection) {
-  return connection?.name || humanize(connection?.provider || connection?.id || "provider");
-}
-
-function normalizeStaticModel(model, connection) {
-  if (!model?.id) return null;
-  return {
-    id: `${connection.provider}/${model.id}`,
-    requestModel: `${connection.provider}/${model.id}`,
-    name: model.name || model.id,
-    providerId: connection.provider,
-    providerName: getProviderLabel(connection),
-    source: "static",
-  };
-}
-
-function normalizeLiveModel(model, connection) {
-  const rawId = typeof model === "string" ? model : model?.id || model?.name || model?.model || "";
-  if (!rawId) return null;
-
-  const displayName = typeof model === "string"
-    ? model
-    : model?.name || model?.displayName || rawId;
-
-  let requestModel = rawId;
-  const isCompatible = isOpenAICompatibleProvider(connection.provider) || isAnthropicCompatibleProvider(connection.provider);
-  if (isCompatible && !rawId.includes("/")) {
-    requestModel = `${connection.provider}/${rawId}`;
-  }
-
-  return {
-    id: requestModel,
-    requestModel,
-    name: displayName,
-    providerId: connection.provider,
-    providerName: getProviderLabel(connection),
-    source: "live",
-  };
-}
-
-function parseProviderModelsPayload(data) {
-  if (Array.isArray(data?.models)) return data.models;
-  if (Array.isArray(data?.data)) return data.data;
-  if (Array.isArray(data?.results)) return data.results;
-  if (Array.isArray(data)) return data;
-  return [];
-}
-
-function dedupeModels(models) {
-  const map = new Map();
-  for (const model of models) {
-    if (!model?.id) continue;
-    if (!map.has(model.id)) map.set(model.id, model);
-  }
-  return Array.from(map.values());
+function inputAccept(mode) {
+  return mode === "stt" ? "audio/*" : "image/*,audio/*,.pdf,.txt,.md,.csv,.json,.yaml,.yml,.xml,.html,.css,.js,.jsx,.ts,.tsx,.py,.java,.go,.rs,.c,.cpp,.h,.docx,.xlsx,.pptx";
 }
 
 export default function BasicChatPageClient() {
-  const [providerGroups, setProviderGroups] = useState([]);
-  const [loadingData, setLoadingData] = useState(true);
-  const [loadError, setLoadError] = useState("");
-  const [sessions, setSessions] = useState(() => {
-    if (typeof window === "undefined") return [];
-    try {
-      const saved = safeParse(globalThis.localStorage.getItem(STORAGE_KEYS.sessions), []);
-      return Array.isArray(saved) ? saved.map((session) => ({
-        ...session,
-        messages: Array.isArray(session.messages) ? session.messages : [],
-      })) : [];
-    } catch { return []; }
-  });
-  const [activeSessionId, setActiveSessionId] = useState(() => {
-    if (typeof window === "undefined") return "";
-    return globalThis.localStorage.getItem(STORAGE_KEYS.activeSessionId) || "";
-  });
-  const [activeProviderId, setActiveProviderId] = useState(() => {
-    if (typeof window === "undefined") return "";
-    return globalThis.localStorage.getItem(STORAGE_KEYS.activeProviderId) || "";
-  });
-  const [activeModelId, setActiveModelId] = useState("");
-  const [draft, setDraft] = useState(() => {
-    if (typeof window === "undefined") return "";
-    return globalThis.localStorage.getItem(STORAGE_KEYS.draft) || "";
-  });
+  const [sessions, setSessions] = useState([]);
+  const [activeSessionId, setActiveSessionId] = useState("");
+  const [draft, setDraft] = useState("");
   const [attachments, setAttachments] = useState([]);
-  const [isSending, setIsSending] = useState(false);
-  const [streamingMessageId, setStreamingMessageId] = useState("");
-  const [streamingText, setStreamingText] = useState("");
-  const [isHydrated, setIsHydrated] = useState(false);
-  const [modelMenuOpen, setModelMenuOpen] = useState(false);
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const fileInputRef = useRef(null);
+  const [activeProviders, setActiveProviders] = useState([]);
+  const [modelAliases, setModelAliases] = useState({});
+  const [modelOpen, setModelOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [railOpen, setRailOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [ready, setReady] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [confirmRun, setConfirmRun] = useState(null);
+  const [validation, setValidation] = useState({});
+  const [currentEmbeddingVectors, setCurrentEmbeddingVectors] = useState(null);
+  const blobStoreRef = useRef(null);
   const abortRef = useRef(null);
-  const initializedRef = useRef(false);
-  const modelMenuRef = useRef(null);
-  const historyMenuRef = useRef(null);
+  const pollControllersRef = useRef(new Map());
+  const fileInputRef = useRef(null);
+  const { getCaps } = useModelCaps();
+
+  const activeSession = useMemo(
+    () => sessions.find((session) => session.id === activeSessionId) || sessions[0] || null,
+    [sessions, activeSessionId],
+  );
+  const mode = activeSession?.mode || "chat";
+  const currentTab = tabFor(mode);
+  const caps = getCaps(activeSession?.model);
+  const [selectedProvider, selectedModel] = String(activeSession?.model || "").split(/\/(.+)/);
+  const thinkingLevels = caps?.reasoning ? getThinkingLevels(selectedProvider, selectedModel) : null;
+  const pendingCalls = useMemo(() => new Set(pendingToolCalls(activeSession?.messages).map((call) => call.id)), [activeSession?.messages]);
+  const continuationMessageId = useMemo(() => toolContinuationMessageId(activeSession?.messages), [activeSession?.messages]);
+  const sortedSessions = useMemo(() => [...sessions].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)), [sessions]);
+
+  const patchSession = useCallback((sessionId, patch) => {
+    setSessions((current) => current.map((session) => session.id === sessionId
+      ? { ...session, ...(typeof patch === "function" ? patch(session) : patch), updatedAt: Date.now() }
+      : session));
+  }, []);
+
+  const patchMessage = useCallback((sessionId, messageId, patch) => {
+    patchSession(sessionId, (session) => ({
+      messages: session.messages.map((message) => message.id === messageId
+        ? { ...message, ...(typeof patch === "function" ? patch(message) : patch) }
+        : message),
+    }));
+  }, [patchSession]);
+
+  const stop = useCallback(() => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    if (activeSessionId) {
+      patchSession(activeSessionId, (session) => ({
+        messages: session.messages.map((message) => ["streaming", "running"].includes(message.status)
+          ? { ...message, status: "stopped" }
+          : message),
+      }));
+    }
+    setBusy(false);
+  }, [activeSessionId, patchSession]);
 
   useEffect(() => {
-    setIsHydrated(true);
+    let cancelled = false;
+    (async () => {
+      const blobStore = await openBlobStore();
+      if (cancelled) return;
+      blobStoreRef.current = blobStore;
+      await migrateBasicChatSessions({ blobStore });
+      const loaded = loadSessions().map(normalizeLoadedSession);
+      const first = loaded[0] || createSession({ mode: "chat" });
+      const savedActive = globalThis.localStorage.getItem(ACTIVE_SESSION_KEY);
+      setSessions(loaded.length ? loaded : [first]);
+      setActiveSessionId(loaded.some((session) => session.id === savedActive) ? savedActive : first.id);
+      setReady(true);
+      await evictBlobs({ blobStore, sessions: loaded, maxBytes: BLOB_BUDGET_BYTES });
+    })().catch((error) => setNotice(errorText(error)));
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
     let cancelled = false;
-
-    async function loadData() {
-      setLoadingData(true);
-      setLoadError("");
-
-      try {
-        const providersRes = await fetch("/api/providers", { cache: "no-store" });
-        const providersData = await providersRes.json().catch(() => ({}));
-        const connections = Array.isArray(providersData.connections)
-          ? providersData.connections.filter((connection) => connection?.isActive !== false)
-          : [];
-
-        if (connections.length === 0) {
-          if (!cancelled) {
-            setProviderGroups([]);
-            setLoadError("No providers connected yet.");
-          }
-          return;
-        }
-
-        const providerMap = new Map();
-
-        for (const connection of connections) {
-          const providerId = connection.provider || connection.id;
-          const providerName = getProviderLabel(connection);
-          const providerType = isOpenAICompatibleProvider(providerId)
-            ? "openai-compatible"
-            : isAnthropicCompatibleProvider(providerId)
-              ? "anthropic-compatible"
-              : providerId;
-
-          if (!providerMap.has(providerId)) {
-            providerMap.set(providerId, {
-              providerId,
-              providerName,
-              providerType,
-              connections: [],
-              models: [],
-            });
-          }
-
-          const group = providerMap.get(providerId);
-          group.providerName = group.providerName || providerName;
-          group.providerType = group.providerType || providerType;
-          group.connections.push(connection);
-
-          const staticModels = getModelsByProviderId(providerId)
-            .map((model) => normalizeStaticModel(model, connection))
-            .filter(Boolean);
-          group.models.push(...staticModels);
-        }
-
-        const liveResults = await Promise.all(
-          connections.map(async (connection) => {
-            try {
-              const response = await fetch(`/api/providers/${connection.id}/models`, { cache: "no-store" });
-              const data = await response.json().catch(() => ({}));
-              if (!response.ok) return { connection, models: [] };
-              const models = parseProviderModelsPayload(data)
-                .map((model) => normalizeLiveModel(model, connection))
-                .filter(Boolean);
-              return { connection, models };
-            } catch {
-              return { connection, models: [] };
-            }
-          })
-        );
-
-        for (const result of liveResults) {
-          const providerId = result.connection.provider || result.connection.id;
-          const group = providerMap.get(providerId);
-          if (!group) continue;
-          group.models.push(...result.models);
-        }
-
-        const normalized = Array.from(providerMap.values())
-          .map((group) => ({
-            ...group,
-            models: dedupeModels(group.models).sort((a, b) => a.name.localeCompare(b.name)),
-          }))
-          .filter((group) => group.models.length > 0)
-          .sort((a, b) => a.providerName.localeCompare(b.providerName));
-
-        if (!cancelled) {
-          setProviderGroups(normalized);
-          if (normalized.length === 0) {
-            setLoadError("Providers connected but no models available.");
-          }
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setLoadError(textValue(error?.message) || "Failed to load providers/models.");
-          setProviderGroups([]);
-        }
-      } finally {
-        if (!cancelled) setLoadingData(false);
-      }
-    }
-
-    loadData();
-    return () => {
-      cancelled = true;
-    };
+    Promise.all([
+      fetch("/api/providers", { cache: "no-store" }).then((response) => response.ok ? response.json() : {}),
+      fetch("/api/models/alias", { cache: "no-store" }).then((response) => response.ok ? response.json() : {}),
+    ]).then(([providers, aliases]) => {
+      if (cancelled) return;
+      setActiveProviders((providers.connections || []).filter((connection) => connection.isActive !== false));
+      setModelAliases(aliases.aliases || {});
+    }).catch((error) => { if (!cancelled) setNotice(errorText(error)); });
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (modelMenuRef.current && !modelMenuRef.current.contains(event.target)) {
-        setModelMenuOpen(false);
-      }
-      if (historyMenuRef.current && !historyMenuRef.current.contains(event.target)) {
-        setHistoryOpen(false);
-      }
-    };
+    if (!ready) return;
+    if (!saveSessions(sessions)) setNotice("Browser storage is full. Conversation metadata was not saved.");
+    if (activeSessionId) globalThis.localStorage.setItem(ACTIVE_SESSION_KEY, activeSessionId);
+  }, [sessions, activeSessionId, ready]);
 
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  const modelIndex = useMemo(() => {
-    const map = new Map();
-    for (const group of providerGroups) {
-      for (const model of group.models) {
-        map.set(model.id, {
-          ...model,
-          providerId: group.providerId,
-          providerName: group.providerName,
+  const pollVideo = useCallback(async ({ sessionId, messageId, jobId, pollToken }) => {
+    if (!jobId || !pollToken || pollControllersRef.current.has(messageId)) return;
+    const controller = new AbortController();
+    pollControllersRef.current.set(messageId, controller);
+    let attempt = 0;
+    try {
+      while (!controller.signal.aborted) {
+        const spec = buildVideoPollRequest(jobId, pollToken);
+        const response = await fetch(toDashboardPath(spec.path), { method: "GET", headers: spec.headers, signal: controller.signal });
+        if (!response.ok) throw new Error(await parseError(response));
+        let result = normalizeResponse("video", await response.json());
+        if (result.kind !== "error" && result.done) result = await persistGeneratedResult(result, blobStoreRef.current);
+        patchMessage(sessionId, messageId, {
+          result,
+          status: result.kind === "error" ? "error" : result.done ? "done" : "polling",
+          error: result.kind === "error" ? result.message : null,
+          ...(result.done ? { job: null } : {}),
         });
+        if (result.kind === "error" || result.done) break;
+        const delay = POLL_DELAYS[Math.min(attempt, POLL_DELAYS.length - 1)];
+        attempt += 1;
+        await new Promise((resolve) => setTimeout(resolve, delay));
       }
+    } catch (error) {
+      if (error.name !== "AbortError") patchMessage(sessionId, messageId, { status: "error", error: errorText(error) });
+    } finally {
+      pollControllersRef.current.delete(messageId);
     }
-    return map;
-  }, [providerGroups]);
-
-  const activeProviderGroup = useMemo(() => {
-    return providerGroups.find((group) => group.providerId === activeProviderId) || providerGroups[0] || null;
-  }, [providerGroups, activeProviderId]);
-
-  const activeModel = useMemo(() => {
-    if (activeModelId && modelIndex.has(activeModelId)) return modelIndex.get(activeModelId);
-    if (activeSessionId) {
-      const session = sessions.find((item) => item.id === activeSessionId);
-      if (session?.modelId && modelIndex.has(session.modelId)) return modelIndex.get(session.modelId);
-    }
-    return activeProviderGroup?.models?.[0] || null;
-  }, [activeModelId, modelIndex, activeProviderGroup, sessions, activeSessionId]);
-
-  const currentSession = useMemo(() => sessions.find((session) => session.id === activeSessionId) || null, [sessions, activeSessionId]);
-  const currentMessages = currentSession?.messages || [];
-  const sessionItems = useMemo(() => [...sessions].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()), [sessions]);
-  const canSend = !isSending && !!activeModel && (draft.trim().length > 0 || attachments.length > 0);
+  }, [patchMessage]);
 
   useEffect(() => {
-    if (!isHydrated) return;
-    try {
-      globalThis.localStorage.setItem(STORAGE_KEYS.sessions, JSON.stringify(sessions));
-      globalThis.localStorage.setItem(STORAGE_KEYS.activeSessionId, activeSessionId);
-      globalThis.localStorage.setItem(STORAGE_KEYS.activeProviderId, activeProviderId);
-      globalThis.localStorage.setItem(STORAGE_KEYS.draft, draft);
-    } catch {
-      // Ignore storage errors.
-    }
-  }, [isHydrated, sessions, activeSessionId, activeProviderId, draft]);
+    if (!ready) return;
+    for (const job of pendingVideoJobs(sessions)) pollVideo(job);
+  }, [ready, sessions, pollVideo]);
 
-  useEffect(() => {
-    if (!isHydrated || loadingData || initializedRef.current) return;
-    if (providerGroups.length === 0) return;
-
-    const savedProvider = providerGroups.find((group) => group.providerId === activeProviderId) || providerGroups[0];
-    const savedModel = activeModelId && modelIndex.has(activeModelId)
-      ? modelIndex.get(activeModelId)
-      : savedProvider.models[0];
-
-    if (sessions.length > 0) {
-      const session = sessions.find((item) => item.id === activeSessionId) || sessions[0];
-      const sessionModel = session?.modelId && modelIndex.has(session.modelId)
-        ? modelIndex.get(session.modelId)
-        : savedModel;
-      initializedRef.current = true;
-      setActiveSessionId(session.id);
-      setActiveProviderId(sessionModel?.providerId || savedProvider.providerId);
-      setActiveModelId(sessionModel?.id || savedModel.id);
-      return;
-    }
-
-    const session = {
-      id: createId(),
-      title: "New chat",
-      providerId: savedProvider.providerId,
-      providerName: savedProvider.providerName,
-      modelId: savedModel.id,
-      modelName: savedModel.name,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      messages: [],
-    };
-
-    initializedRef.current = true;
-    setSessions([session]);
-    setActiveSessionId(session.id);
-    setActiveProviderId(savedProvider.providerId);
-    setActiveModelId(savedModel.id);
-  }, [isHydrated, loadingData, providerGroups, modelIndex, sessions, activeSessionId, activeProviderId, activeModelId]);
-
-  const updateSession = (sessionId, updater) => {
-    setSessions((prev) => prev.map((session) => (session.id === sessionId ? updater(cloneSession(session)) : session)));
-  };
-
-  const ensureSessionForModel = (model) => {
-    if (!model) return null;
-    return {
-      id: createId(),
-      title: "New chat",
-      providerId: model.providerId,
-      providerName: model.providerName,
-      modelId: model.id,
-      modelName: model.name,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      messages: [],
-    };
-  };
-
-  const handleNewChat = () => {
-    if (!activeModel) return;
-    const session = ensureSessionForModel(activeModel);
-    if (!session) return;
-    setSessions((prev) => [session, ...prev]);
-    setActiveSessionId(session.id);
-    setActiveProviderId(session.providerId);
-    setActiveModelId(session.modelId);
-    setDraft("");
-    setAttachments([]);
-    setStreamingMessageId("");
-    setStreamingText("");
-  };
-
-  const handleSelectSession = (sessionId) => {
-    const session = sessions.find((item) => item.id === sessionId);
-    if (!session) return;
-    setActiveSessionId(sessionId);
-    setActiveProviderId(session.providerId || activeProviderId);
-    setActiveModelId(session.modelId || activeModelId);
-    setHistoryOpen(false);
-  };
-
-  const handleDeleteCurrentChat = () => {
-    if (!activeSessionId) return;
-    const nextSessions = sessions.filter((session) => session.id !== activeSessionId);
-    const fallback = nextSessions[0] || null;
-    setSessions(nextSessions);
-    if (fallback) {
-      setActiveSessionId(fallback.id);
-      setActiveProviderId(fallback.providerId);
-      setActiveModelId(fallback.modelId);
-    } else {
-      setActiveSessionId("");
-      setActiveProviderId("");
-      setActiveModelId("");
-    }
-  };
-
-  const handleSelectProvider = (providerId) => {
-    const group = providerGroups.find((item) => item.providerId === providerId);
-    if (!group || group.models.length === 0) return;
-    const nextModel = group.models[0];
-
-    const current = sessions.find((session) => session.id === activeSessionId);
-    if (current && current.messages.length > 0) {
-      const session = ensureSessionForModel(nextModel);
-      if (!session) return;
-      setSessions((prev) => [session, ...prev]);
-      setActiveSessionId(session.id);
-    } else if (current) {
-      setSessions((prev) => prev.map((item) => (item.id === current.id ? {
-        ...item,
-        providerId: group.providerId,
-        providerName: group.providerName,
-        modelId: nextModel.id,
-        modelName: nextModel.name,
-      } : item)));
-      setActiveSessionId(current.id);
-    }
-
-    setActiveProviderId(group.providerId);
-    setActiveModelId(nextModel.id);
-    setModelMenuOpen(false);
-  };
-
-  const handleSelectModel = (modelId) => {
-    const model = modelIndex.get(modelId);
-    if (!model) return;
-
-    const current = sessions.find((session) => session.id === activeSessionId);
-    if (current && current.messages.length > 0) {
-      const session = ensureSessionForModel(model);
-      if (!session) return;
-      setSessions((prev) => [session, ...prev]);
-      setActiveSessionId(session.id);
-    } else if (current) {
-      setSessions((prev) => prev.map((item) => (item.id === current.id ? {
-        ...item,
-        providerId: model.providerId,
-        providerName: model.providerName,
-        modelId: model.id,
-        modelName: model.name,
-      } : item)));
-      setActiveSessionId(current.id);
-    } else {
-      const session = ensureSessionForModel(model);
-      if (!session) return;
-      setSessions((prev) => [session, ...prev]);
-      setActiveSessionId(session.id);
-    }
-
-    setActiveProviderId(model.providerId);
-    setActiveModelId(model.id);
-    setModelMenuOpen(false);
-  };
-
-  const handleAttachFiles = async (event) => {
-    const files = Array.from(event.target.files || []);
-    if (files.length === 0) return;
-
-    const images = files.filter((file) => file.type.startsWith("image/"));
-    if (images.length === 0) {
-      event.target.value = "";
-      return;
-    }
-
-    const converted = await Promise.all(images.map(async (file) => ({
-      id: createId(),
-      name: file.name,
-      type: file.type,
-      size: file.size,
-      dataUrl: await fileToDataUrl(file),
-    })));
-
-    setAttachments((prev) => [...prev, ...converted]);
-    event.target.value = "";
-  };
-
-  const removeAttachment = (attachmentId) => {
-    setAttachments((prev) => prev.filter((attachment) => attachment.id !== attachmentId));
-  };
-
-  const handleStop = () => {
+  useEffect(() => () => {
     abortRef.current?.abort();
-  };
+    for (const controller of pollControllersRef.current.values()) controller.abort();
+  }, []);
 
-  const finalizeSessionTitle = (sessionId, titleSeed) => {
-    const title = makeSessionTitle(titleSeed);
-    updateSession(sessionId, (session) => ({
-      ...session,
-      title: session.title === "New chat" ? title : session.title,
-      updatedAt: new Date().toISOString(),
-    }));
-  };
-
-  const sendMessage = async () => {
-    const model = activeModel || activeProviderGroup?.models?.[0] || null;
-    if (!model) return;
-
-    const userText = draft.trim();
-    if (!userText && attachments.length === 0) return;
-
-    let sessionId = activeSessionId;
-    let session = sessions.find((item) => item.id === sessionId);
-    if (!session) {
-      session = ensureSessionForModel(model);
-      if (!session) return;
-      sessionId = session.id;
-      setSessions((prev) => [session, ...prev]);
-      setActiveSessionId(sessionId);
+  const loadNativeAttachments = useCallback(async (records) => {
+    const dataUrls = {};
+    for (const record of records) {
+      if (!["image", "audio", "pdf"].includes(record.kind) || record.native === false) continue;
+      const blob = await blobStoreRef.current?.get(record.id);
+      if (blob) dataUrls[record.id] = await blobToDataUrl(blob);
     }
+    return dataUrls;
+  }, []);
 
-    const userMessage = {
-      id: createId(),
-      role: "user",
-      content: userText,
-      attachments: attachments.map((attachment) => ({
-        id: attachment.id,
-        name: attachment.name,
-        type: attachment.type,
-        dataUrl: attachment.dataUrl,
-      })),
-      createdAt: new Date().toISOString(),
-    };
-
-    const assistantMessageId = createId();
-    const assistantMessage = {
-      id: assistantMessageId,
-      role: "assistant",
-      content: "",
-      createdAt: new Date().toISOString(),
-      status: "streaming",
-    };
-
-    const nextMessages = [...(session.messages || []), userMessage, assistantMessage];
-    setSessions((prev) => prev.map((item) => (item.id === sessionId ? {
-      ...item,
-      providerId: model.providerId,
-      providerName: model.providerName,
-      modelId: model.id,
-      modelName: model.name,
-      messages: nextMessages,
-      updatedAt: new Date().toISOString(),
-      title: item.title === "New chat" ? makeSessionTitle(userText) : item.title,
-    } : item)));
-    setDraft("");
-    setAttachments([]);
-    setIsSending(true);
-    setStreamingMessageId(assistantMessageId);
-    setStreamingText("");
+  const execute = useCallback(async ({ session, userText, composerAttachments, retryMessages } = {}) => {
+    if (!session?.model) { setNotice("Select a model first."); return; }
+    const sessionId = session.id;
+    const runMode = session.mode;
+    const controller = new AbortController();
     abortRef.current?.abort();
-    abortRef.current = new AbortController();
+    abortRef.current = controller;
+    setBusy(true);
+    setNotice("");
 
-    const requestMessages = nextMessages
-      .filter((message) => !(message.role === "assistant" && message.id === assistantMessageId))
-      .map((message) => ({
-        role: message.role,
-        content: message.role === "user" ? buildUserContent(message) : message.content,
-      }));
+    let requestMessages = retryMessages;
+    let userMessage = null;
+    let runAttachments = composerAttachments || [];
+    const titleSeed = userText || inputPlaceholder(runMode);
 
     try {
-      const response = await fetch("/api/dashboard/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "text/event-stream",
-        },
-        body: JSON.stringify({
-          model: model.requestModel || model.id,
-          messages: requestMessages,
-          stream: true,
-        }),
-        signal: abortRef.current.signal,
+      if (runMode === "chat" && !requestMessages) {
+        const checked = validateChatAttachments(runAttachments, getCaps(session.model) || {});
+        if (checked.errors.length) throw new Error(checked.errors.join("\n"));
+        runAttachments = checked.attachments;
+        userMessage = { id: newId(), role: "user", content: userText, attachments: runAttachments, createdAt: Date.now() };
+        const nextHistory = [...session.messages, userMessage];
+        const dataUrls = await loadNativeAttachments(nextHistory.flatMap((message) => message.attachments || []));
+        requestMessages = toApiMessages(nextHistory, dataUrls);
+      }
+
+      const tools = parseToolsJson(session.tools);
+      if (!tools.ok) { setValidation({ tools: tools.error }); throw new Error(tools.error); }
+      const advanced = parseAdvancedJson(session.advanced);
+      if (!advanced.ok) { setValidation({ advanced: advanced.error }); throw new Error(advanced.error); }
+      setValidation({});
+
+      let input;
+      if (runMode === "chat") input = { messages: requestMessages };
+      else if (runMode === "stt") {
+        const audio = runAttachments.find((attachment) => attachment.kind === "audio");
+        const blob = audio ? await blobStoreRef.current?.get(audio.id) : null;
+        input = primaryInputForMode(runMode, userText, audio && blob ? [{ ...audio, blob }] : []);
+      } else input = primaryInputForMode(runMode, userText, runAttachments);
+
+      const advancedValue = { ...advanced.value };
+      if (runMode === "chat" && tools.value) advancedValue.tools = tools.value;
+      const requestModel = runMode === "tts" && session.settings.voice
+        ? `${session.model}/${session.settings.voice}`
+        : session.model;
+      const requestSettings = runMode === "tts"
+        ? Object.fromEntries(Object.entries(session.settings).filter(([key]) => key !== "voice"))
+        : session.settings;
+      const spec = buildPlaygroundRequest({
+        mode: runMode,
+        model: requestModel,
+        settings: requestSettings,
+        input,
+        advanced: advancedValue,
+        limits: getCaps(session.model) || {},
       });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(textValue(errorData.error || errorData.message || `Request failed (${response.status})`));
-      }
-
-      const reader = response.body?.getReader();
-      if (!reader) {
-        const data = await response.json().catch(() => ({}));
-        const fallbackText = textValue(data?.choices?.[0]?.message?.content || data?.output_text || data?.error || data?.message || "");
-        updateSession(sessionId, (currentSession) => ({
-          ...currentSession,
-          messages: currentSession.messages.map((message) => (message.id === assistantMessageId ? { ...message, content: fallbackText, status: "done" } : message)),
-          updatedAt: new Date().toISOString(),
-        }));
-        return;
-      }
-
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let assistantText = "";
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split(/\r?\n/);
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed.startsWith("data:")) continue;
-
-          const payload = trimmed.slice(5).trim();
-          if (!payload || payload === "[DONE]") continue;
-
-          try {
-            const chunk = JSON.parse(payload);
-            const text = readAssistantText(chunk);
-            if (!text) continue;
-
-            assistantText += text;
-            setStreamingText(assistantText);
-            updateSession(sessionId, (currentSession) => ({
-              ...currentSession,
-              messages: currentSession.messages.map((message) => (message.id === assistantMessageId ? { ...message, content: assistantText, status: "streaming" } : message)),
-              updatedAt: new Date().toISOString(),
-            }));
-          } catch {
-            // Ignore malformed chunks.
-          }
-        }
-      }
-
-      updateSession(sessionId, (currentSession) => ({
-        ...currentSession,
-        messages: currentSession.messages.map((message) => (message.id === assistantMessageId ? { ...message, content: assistantText || message.content, status: "done" } : message)),
-        updatedAt: new Date().toISOString(),
+      const path = toDashboardPath(spec.path);
+      const assistantId = newId();
+      const displayUser = userMessage || (runMode !== "chat" ? { id: newId(), role: "user", content: userText, attachments: runAttachments, createdAt: Date.now() } : null);
+      const pending = { id: assistantId, role: "assistant", content: "", status: spec.responseType === "sse" ? "streaming" : "running", createdAt: Date.now() };
+      patchSession(sessionId, (current) => ({
+        title: current.messages.length ? current.title : sessionTitle(titleSeed),
+        messages: [...current.messages, ...(displayUser ? [displayUser] : []), pending],
       }));
-      finalizeSessionTitle(sessionId, userText);
+      setDraft("");
+      setAttachments([]);
+
+      const response = await fetch(path, {
+        method: spec.method,
+        headers: spec.headers,
+        body: spec.bodyType === "form" ? toFormData(spec.formFields) : JSON.stringify(spec.body),
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(await parseError(response));
+
+      if (spec.responseType === "sse") {
+        const reader = response.body?.getReader();
+        if (!reader) throw new Error("Streaming response has no body");
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let state = createStreamState();
+        while (true) {
+          const { value, done } = await reader.read();
+          buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+          const reduced = reduceSseBuffer(state, buffer, done);
+          state = reduced.state;
+          buffer = reduced.rest;
+          patchMessage(sessionId, assistantId, {
+            content: state.content,
+            reasoning_content: state.reasoningContent,
+            tool_calls: state.toolCalls,
+            usage: state.usage,
+            finish_reason: state.finishReason,
+            status: "streaming",
+          });
+          if (done) break;
+        }
+        if (state.error) throw new Error(state.error);
+        const normalized = normalizeResponse("chat", state);
+        patchMessage(sessionId, assistantId, { ...normalized.message, result: normalized, usage: normalized.usage, finish_reason: normalized.finishReason, status: "done" });
+      } else {
+        const payload = spec.responseType === "blob" ? await response.blob() : await response.json();
+        let result = normalizeResponse(runMode, payload);
+        if (result.kind === "error") throw new Error(result.message);
+        result = await persistGeneratedResult(result, blobStoreRef.current);
+        const pollToken = response.headers.get("x-playground-video-token");
+        if (result.kind === "video" && result.id && !result.done && !pollToken) {
+          throw new Error("Video gateway did not return a polling token");
+        }
+        if (result.kind === "embedding") setCurrentEmbeddingVectors(result.vectors.map((vector) => vector.values));
+        const storedResult = result.kind === "embedding"
+          ? { ...result, vectors: result.vectors.map(({ values, ...vector }) => vector) }
+          : result;
+        const patch = { result: storedResult, status: result.kind === "video" && !result.done ? "polling" : "done" };
+        if (result.kind === "chat") Object.assign(patch, result.message, { usage: result.usage, finish_reason: result.finishReason });
+        if (result.kind === "text") patch.content = result.text;
+        if (result.kind === "video" && result.id) patch.job = { id: result.id, pollToken };
+        patchMessage(sessionId, assistantId, patch);
+        const generatedIds = [
+          result.blobId,
+          ...(result.images || []).map((item) => item.blobId),
+          ...(result.videos || []).map((item) => item?.blobId),
+        ].filter(Boolean);
+        const eviction = await evictBlobs({ blobStore: blobStoreRef.current, sessions, keepIds: generatedIds });
+        if (eviction.overBudget) setNotice("Playground media storage exceeds 500 MB because referenced outputs are retained.");
+        if (result.kind === "video" && result.id && !result.done) pollVideo({ sessionId, messageId: assistantId, jobId: result.id, pollToken });
+      }
     } catch (error) {
       if (error.name !== "AbortError") {
-        const errorText = textValue(error?.message || error);
-        updateSession(sessionId, (currentSession) => ({
-          ...currentSession,
-          messages: currentSession.messages.map((message) => (message.id === assistantMessageId ? { ...message, content: message.content || `Error: ${errorText}`, status: "error" } : message)),
-          updatedAt: new Date().toISOString(),
+        setNotice(errorText(error));
+        setSessions((current) => current.map((item) => item.id !== sessionId ? item : {
+          ...item,
+          messages: item.messages.map((message) => message.status === "streaming" || message.status === "running"
+            ? { ...message, status: "error", error: errorText(error) }
+            : message),
         }));
-        setLoadError(errorText || "Failed to send message.");
       }
     } finally {
-      setIsSending(false);
-      setStreamingMessageId("");
-      setStreamingText("");
-      abortRef.current = null;
+      if (abortRef.current === controller) abortRef.current = null;
+      setBusy(false);
+    }
+  }, [getCaps, loadNativeAttachments, patchMessage, patchSession, pollVideo]);
+
+  const requestRun = useCallback(() => {
+    if (!activeSession || busy) return;
+    if (activeSession.mode === "stt" && !attachments.some((attachment) => attachment.kind === "audio")) { setNotice("Attach one audio file."); return; }
+    if (activeSession.mode !== "stt" && activeSession.mode !== "chat" && !draft.trim()) { setNotice("Enter input first."); return; }
+    if (activeSession.mode === "chat" && !draft.trim() && attachments.length === 0) return;
+    const run = (session = activeSession) => execute({ session, userText: draft.trim(), composerAttachments: attachments });
+    if (needsConfirmation(activeSession)) setConfirmRun(() => () => run({ ...activeSession, confirmed: true }));
+    else run();
+  }, [activeSession, attachments, busy, draft, execute]);
+
+  const addToolResult = useCallback((toolCallId, result) => {
+    if (!activeSession || busy) return;
+    const toolMessage = { id: newId(), ...buildToolResultMessage(toolCallId, result), createdAt: Date.now() };
+    patchSession(activeSession.id, { messages: applyToolResult(activeSession.messages, toolMessage) });
+  }, [activeSession, busy, patchSession]);
+
+  const continueToolResults = useCallback(async () => {
+    if (!activeSession || busy || pendingToolCalls(activeSession.messages).length) return;
+    const dataUrls = await loadNativeAttachments(activeSession.messages.flatMap((message) => message.attachments || []));
+    execute({ session: activeSession, userText: "", composerAttachments: [], retryMessages: toApiMessages(activeSession.messages, dataUrls) });
+  }, [activeSession, busy, execute, loadNativeAttachments]);
+
+  const regenerate = useCallback(async () => {
+    if (!activeSession || busy || mode !== "chat") return;
+    const messages = trimTrailingAssistant(activeSession.messages);
+    if (!messages.some((message) => message.role === "user")) return;
+    const dataUrls = await loadNativeAttachments(messages.flatMap((message) => message.attachments || []));
+    patchSession(activeSession.id, { messages });
+    execute({ session: { ...activeSession, messages }, userText: "", composerAttachments: [], retryMessages: toApiMessages(messages, dataUrls) });
+  }, [activeSession, busy, execute, loadNativeAttachments, mode, patchSession]);
+
+  const retryUserMessage = useCallback((message) => {
+    if (!activeSession || busy || mode !== "chat") return;
+    setDraft(message.content || "");
+    setAttachments(message.attachments || []);
+    patchSession(activeSession.id, { messages: trimFromUserMessage(activeSession.messages, message.id) });
+  }, [activeSession, busy, mode, patchSession]);
+
+  const handleFiles = async (event) => {
+    const files = [...(event.target.files || [])];
+    event.target.value = "";
+    if (!files.length || !blobStoreRef.current) return;
+    try {
+      const result = await preparePlaygroundAttachments(files, { blobStore: blobStoreRef.current, existing: attachments, only: mode === "stt" ? "audio" : undefined });
+      setAttachments((current) => [...current, ...result.records]);
+      const problems = [...result.rejected.map((item) => `${item.name}: ${item.reason}`), ...result.errors.map((item) => `${item.name}: ${item.message}`)];
+      if (problems.length) setNotice(problems.join("\n"));
+      await evictBlobs({ blobStore: blobStoreRef.current, sessions, keepIds: [...attachments, ...result.records].map((item) => item.id) });
+    } catch (error) { setNotice(errorText(error)); }
+  };
+
+  const removeAttachment = async (id) => {
+    setAttachments((current) => current.filter((attachment) => attachment.id !== id));
+    await blobStoreRef.current?.delete(id);
+  };
+
+  const clearComposer = () => {
+    const storedIds = new Set(activeSession?.messages.flatMap((message) => message.attachments?.map((attachment) => attachment.id) || []) || []);
+    for (const attachment of attachments) if (!storedIds.has(attachment.id)) blobStoreRef.current?.delete(attachment.id);
+    setAttachments([]);
+    setDraft("");
+  };
+
+  const newConversation = (nextMode = mode) => {
+    const session = createSession({ mode: nextMode });
+    setSessions((current) => [session, ...current]);
+    setActiveSessionId(session.id);
+    setCurrentEmbeddingVectors(null);
+    clearComposer();
+  };
+
+  const selectMode = (nextMode) => {
+    if (!activeSession || busy || nextMode === activeSession.mode) return;
+    if (activeSession.messages.length === 0) patchSession(activeSession.id, { mode: nextMode, settings: createSession({ mode: nextMode }).settings, title: `New ${tabFor(nextMode).label.toLowerCase()}`, model: "", confirmed: false });
+    else { newConversation(nextMode); return; }
+    clearComposer();
+  };
+
+  const selectSession = (sessionId) => {
+    if (busy || sessionId === activeSessionId) return;
+    stop();
+    clearComposer();
+    setCurrentEmbeddingVectors(null);
+    setActiveSessionId(sessionId);
+  };
+
+  const deleteSession = async (sessionId) => {
+    const session = sessions.find((item) => item.id === sessionId);
+    const remaining = sessions.filter((item) => item.id !== sessionId);
+    if (session) await releaseSessionBlobs({ blobStore: blobStoreRef.current, session, remainingSessions: remaining, keepIds: attachments.map((attachment) => attachment.id) });
+    if (remaining.length) {
+      setSessions(remaining);
+      if (activeSessionId === sessionId) setActiveSessionId(remaining[0].id);
+    } else {
+      const replacement = createSession({ mode: "chat" });
+      setSessions([replacement]);
+      setActiveSessionId(replacement.id);
     }
   };
 
-  const handleKeyDown = (event) => {
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      if (canSend) sendMessage();
-    }
-  };
-
-  const modelLabel = activeModel ? `${activeModel.name}` : "Select model";
-  const modelSubLabel = activeModel ? activeModel.requestModel : "Choose from connected providers";
+  if (!ready || !activeSession) return <div className="flex h-full items-center justify-center bg-bg text-text-muted">Loading Playground…</div>;
 
   return (
-    <div className="relative flex-1 flex flex-col h-full min-h-0 min-w-0 bg-[#212121] text-white overflow-hidden">
-      <div className="relative mx-auto flex flex-1 h-full min-h-0 w-full max-w-4xl flex-col">
-        <div className="flex shrink-0 items-center justify-between gap-3 px-4 py-3 lg:px-6">
-          <div ref={modelMenuRef} className="relative">
-            <button
-              type="button"
-              onClick={() => setModelMenuOpen((value) => !value)}
-              className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-left transition hover:bg-white/8"
-            >
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-semibold text-white">{modelLabel}</span>
-                  <span className="material-symbols-outlined text-[18px] text-white/70">expand_more</span>
-                </div>
-                <p className="truncate text-xs text-white/55">{modelSubLabel}</p>
-              </div>
-            </button>
+    <div className="flex h-full min-h-0 bg-bg text-text-main">
+      <ConversationRail sessions={sortedSessions} activeId={activeSession.id} onSelect={selectSession} onNew={() => newConversation(mode)} onDelete={deleteSession} disabled={busy} mobileOpen={railOpen} onMobileClose={() => setRailOpen(false)} />
 
-            {modelMenuOpen ? (
-              <div className="absolute left-0 top-[calc(100%+10px)] z-30 w-[min(520px,calc(100vw-2rem))] overflow-hidden rounded-[20px] border border-white/10 bg-[#262626] shadow-2xl shadow-black/50">
-                <div className="border-b border-white/10 px-4 py-3">
-                  <p className="text-xs uppercase tracking-[0.22em] text-white/45">Models</p>
-                  <p className="text-sm text-white/75">Only from connected providers</p>
-                </div>
-                <div className="max-h-[60vh] overflow-y-auto p-2 custom-scrollbar">
-                  {providerGroups.map((group) => (
-                    <div key={group.providerId} className="mb-2 rounded-[16px] border border-white/10 bg-black/20 p-2">
-                      <div className="flex items-center justify-between px-2 py-2">
-                        <p className="text-sm font-semibold text-white">{group.providerName}</p>
-                        <Badge size="sm" variant="default">{group.models.length}</Badge>
-                      </div>
-                      <div className="grid gap-2 sm:grid-cols-2">
-                        {group.models.map((model) => {
-                          const isActive = model.id === activeModelId;
-                          return (
-                            <button
-                              key={model.id}
-                              type="button"
-                              onClick={() => handleSelectModel(model.id)}
-                              className={`rounded-[14px] border px-3 py-3 text-left transition ${isActive ? "border-blue-400/40 bg-blue-500/15" : "border-white/10 bg-white/5 hover:bg-white/8"}`}
-                            >
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                  <p className="truncate text-sm font-medium text-white">{model.name}</p>
-                                  <p className="truncate text-[11px] text-white/45">{model.requestModel}</p>
-                                </div>
-                                {isActive ? <span className="material-symbols-outlined text-[18px] text-blue-300">check_circle</span> : null}
-                              </div>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-          </div>
-
+      <main className="flex min-w-0 flex-1 flex-col">
+        <header className="space-y-3 border-b border-border-subtle bg-surface px-3 py-3 sm:px-5">
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setHistoryOpen((value) => !value)}
-              className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/80 transition hover:bg-white/8"
-            >
-              History
+            <button type="button" onClick={() => setRailOpen(true)} className="rounded-lg p-2 text-text-muted hover:bg-surface-2 lg:hidden" aria-label="Open conversations"><span className="material-symbols-outlined">menu</span></button>
+            <button type="button" onClick={() => setModelOpen(true)} className="min-w-0 flex-1 rounded-lg border border-border bg-surface-2 px-3 py-2 text-left hover:border-primary">
+              <span className="block truncate text-sm font-medium text-text-main">{activeSession.model || "Select model"}</span>
+              <span className="block text-xs text-text-subtle">{currentTab.label}</span>
             </button>
-            <Button variant="ghost" size="sm" icon="delete" onClick={handleDeleteCurrentChat} disabled={!activeSessionId || sessions.length === 0}>
-              Clear
-            </Button>
+            <Button variant="ghost" size="sm" icon="tune" onClick={() => setSettingsOpen(true)}>Settings</Button>
           </div>
-        </div>
+          <PlaygroundModeTabs mode={mode} onChange={selectMode} disabled={busy} />
+        </header>
 
-        {historyOpen ? (
-          <div ref={historyMenuRef} className="absolute right-4 top-[72px] z-20 w-[min(360px,calc(100vw-2rem))] rounded-[20px] border border-white/10 bg-[#262626] p-2 shadow-2xl shadow-black/50 lg:right-6">
-            <div className="px-3 py-2">
-              <p className="text-xs uppercase tracking-[0.22em] text-white/45">Recent chats</p>
-            </div>
-            <div className="max-h-[48vh] space-y-2 overflow-y-auto p-1 custom-scrollbar">
-              {sessionItems.length === 0 ? (
-                <div className="rounded-[16px] border border-dashed border-white/10 bg-white/5 p-4 text-sm text-white/55">
-                  No conversations yet.
-                </div>
-              ) : sessionItems.map((session) => {
-                const isActive = session.id === activeSessionId;
-                const latestMessage = [...(session.messages || [])].reverse().find((message) => message.role === "user") || session.messages?.[0];
-                return (
-                  <button
-                    key={session.id}
-                    type="button"
-                    onClick={() => handleSelectSession(session.id)}
-                    className={`w-full rounded-[16px] border px-3 py-3 text-left transition ${isActive ? "border-blue-400/40 bg-blue-500/15" : "border-white/10 bg-white/5 hover:bg-white/8"}`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium text-white">{session.title}</p>
-                        <p className="mt-1 truncate text-xs text-white/50">{textValue(latestMessage?.content) || "Empty chat"}</p>
-                      </div>
-                      <span className="text-[10px] text-white/40 shrink-0">{formatRelativeTime(session.updatedAt)}</span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        ) : null}
+        {notice ? <div className="mx-3 mt-3 flex items-start justify-between gap-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger sm:mx-5"><p className="whitespace-pre-wrap">{notice}</p><button type="button" onClick={() => setNotice("")} aria-label="Dismiss"><span className="material-symbols-outlined text-[18px]">close</span></button></div> : null}
 
-        {loadError ? (
-          <div className="mt-4 rounded-[18px] border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-rose-100">
-            <div className="flex items-start gap-3">
-              <span className="material-symbols-outlined text-[20px]">error</span>
-              <p className="text-sm leading-6">{loadError}</p>
-            </div>
-          </div>
-        ) : null}
-
-        <div className="flex flex-1 flex-col min-h-0">
-          <div className="flex-1 overflow-y-auto py-4 custom-scrollbar">
-            {currentMessages.length === 0 ? (
-              <div className="flex min-h-[50vh] items-center justify-center px-4 text-center">
-                <div className="max-w-xl space-y-4">
-                  <div className="mx-auto flex size-16 items-center justify-center rounded-[20px] border border-white/10 bg-white/5 text-white/80">
-                    <span className="material-symbols-outlined text-[30px]">chat</span>
-                  </div>
-                  <div className="space-y-2">
-                    <h2 className="text-2xl font-semibold text-white">Start a conversation</h2>
-                    <p className="text-sm leading-6 text-white/60">
-                      Simple chat interface to interact with any AI model from connected providers. Select a model and start chatting!
-                    </p>
-                  </div>
-                </div>
+        <section className="flex-1 overflow-y-auto px-3 py-5 custom-scrollbar sm:px-5">
+          <div className="mx-auto max-w-4xl space-y-6">
+            {activeSession.messages.length === 0 ? (
+              <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 text-center">
+                <span className="material-symbols-outlined text-5xl text-primary">{currentTab.icon}</span>
+                <h2 className="text-xl font-semibold">{currentTab.label} Playground</h2>
+                <p className="max-w-lg text-sm text-text-muted">Choose model, tune settings, then run. Conversations stay in this browser.</p>
               </div>
             ) : null}
-
-            <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-4">
-              {currentMessages.map((message) => {
-                const isUser = message.role === "user";
-                const isAssistant = message.role === "assistant";
-                const isStreaming = isAssistant && message.id === streamingMessageId && message.status === "streaming";
-                const content = textValue(message.content) || (isAssistant ? streamingText : "");
-
-                return (
-                  <div key={message.id} className={`flex w-full ${isUser ? "justify-end" : "justify-start"} mb-6`}>
-                    <div className={`max-w-[min(88%,42rem)] ${isUser ? "rounded-3xl bg-[#2f2f2f] px-5 py-3.5 text-white" : "text-white/90"}`}>
-                      <div className="mb-1 flex items-center justify-between gap-3">
-                        <span className="text-xs font-semibold">{isUser ? "You" : activeModel?.name || "Assistant"}</span>
-                      </div>
-
-                      {message.attachments?.length ? (
-                        <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-3 mt-2">
-                          {message.attachments.map((attachment) => (
-                            <a key={attachment.id} href={attachment.dataUrl} target="_blank" rel="noreferrer" className="overflow-hidden rounded-[18px] border border-white/10 bg-black/20">
-                              <img src={attachment.dataUrl} alt={attachment.name} className="h-28 w-full object-cover" loading="lazy" decoding="async" />
-                            </a>
-                          ))}
-                        </div>
-                      ) : null}
-
-                      <div className="whitespace-pre-wrap break-words text-[15px] leading-7">
-                        {content}
-                        {isAssistant && isStreaming && !streamingText ? <span className="inline-block animate-pulse">▋</span> : null}
-                      </div>
-                    </div>
+            {activeSession.messages.map((message) => {
+              const user = message.role === "user";
+              return (
+                <article key={message.id} className={`flex ${user ? "justify-end" : "justify-start"}`}>
+                  <div className={`max-w-[min(92%,52rem)] space-y-3 rounded-xl ${user ? "bg-primary/10 px-4 py-3" : "w-full"}`}>
+                    <p className="text-xs font-medium text-text-subtle">{user ? "You" : message.role === "tool" ? "Tool result" : activeSession.model || "Model"}</p>
+                    {user ? <p className="whitespace-pre-wrap break-words text-[15px] leading-7">{message.content}</p> : <PlaygroundResult message={message} pendingCallIds={pendingCalls} onToolResult={addToolResult} onContinueTools={message.id === continuationMessageId ? continueToolResults : null} blobStore={blobStoreRef.current} />}
+                    {typeof message.content === "string" && message.content ? <div className="flex items-center gap-3"><button type="button" onClick={() => navigator.clipboard.writeText(message.content)} className="text-xs text-text-subtle hover:text-primary">Copy</button>{user && mode === "chat" ? <button type="button" onClick={() => retryUserMessage(message)} className="text-xs text-text-subtle hover:text-primary">Edit and retry</button> : null}</div> : null}
+                    {message.attachments?.length ? <div className="flex flex-wrap gap-2">{message.attachments.map((attachment) => <span key={attachment.id} className="rounded-full border border-border bg-surface px-2 py-1 text-xs text-text-muted">{attachment.name}</span>)}</div> : null}
+                    {!user && message.status && message.status !== "done" ? <p className="text-xs text-text-subtle">{message.status}</p> : null}
                   </div>
-                );
-              })}
-            </div>
+                </article>
+              );
+            })}
           </div>
+        </section>
 
-          <div className="shrink-0 pt-2">
-            {attachments.length > 0 ? (
-              <div className="mx-auto mb-3 flex w-full max-w-3xl flex-wrap gap-2 px-4">
-                {attachments.map((attachment) => (
-                  <div key={attachment.id} className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2">
-                    <span className="text-xs text-white/80 max-w-[12rem] truncate">{attachment.name}</span>
-                    <button type="button" onClick={() => removeAttachment(attachment.id)} className="text-white/55 hover:text-white" aria-label="Remove attachment">
-                      <span className="material-symbols-outlined text-[18px]">close</span>
-                    </button>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-
-            <div className="mx-auto w-full max-w-3xl px-4 pb-2">
-              <div className="rounded-[26px] bg-[#2f2f2f] px-3 pt-3 pb-2 shadow-[0_0_15px_rgba(0,0,0,0.10)] ring-1 ring-white/5">
-                <textarea
-                  value={draft}
-                  onChange={(event) => setDraft(event.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder="Message AI"
-                  rows={1}
-                  className="w-full resize-none bg-transparent px-2 text-[15px] leading-6 text-white outline-none placeholder:text-white/40 custom-scrollbar max-h-[25vh] overflow-y-auto"
-                />
-
-                <div className="mt-2 flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <button type="button" onClick={() => fileInputRef.current?.click()} disabled={!activeModel || loadingData} className="p-2 text-white/50 hover:text-white transition rounded-full hover:bg-white/5">
-                      <span className="material-symbols-outlined text-[20px]">attach_file</span>
-                    </button>
-                    <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleAttachFiles} />
-                    <span className="text-xs font-medium text-white/30 truncate max-w-[120px]">{activeModel ? activeModel.name : "No model"}</span>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    {isSending ? (
-                      <button type="button" onClick={handleStop} className="p-2 text-white bg-white/10 hover:bg-white/20 transition rounded-full h-8 w-8 flex items-center justify-center">
-                        <span className="material-symbols-outlined text-[16px]">stop</span>
-                      </button>
-                    ) : null}
-                    <button onClick={sendMessage} disabled={!canSend} className={`h-8 w-8 rounded-full flex items-center justify-center transition ${canSend ? 'bg-white text-black hover:opacity-90' : 'bg-white/10 text-white/30 cursor-not-allowed'}`}>
-                      <span className="material-symbols-outlined text-[16px]">arrow_upward</span>
-                    </button>
-                  </div>
+        <footer className="border-t border-border-subtle bg-surface p-3 sm:p-4">
+          <div className="mx-auto max-w-4xl space-y-3">
+            {attachments.length ? <div className="flex flex-wrap gap-2">{attachments.map((attachment) => <span key={attachment.id} className="flex max-w-full items-center gap-1 rounded-full border border-border bg-surface-2 px-3 py-1.5 text-xs text-text-muted"><span className="truncate">{attachment.name}</span><button type="button" onClick={() => removeAttachment(attachment.id)} aria-label={`Remove ${attachment.name}`}><span className="material-symbols-outlined text-[16px]">close</span></button></span>)}</div> : null}
+            <div className="rounded-xl border border-border bg-surface-2 p-2 focus-within:border-primary">
+              {mode !== "stt" ? <textarea value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (mode === "chat" && event.key === "Enter" && !event.shiftKey) { event.preventDefault(); requestRun(); } }} rows={3} placeholder={inputPlaceholder(mode)} className="w-full resize-none bg-transparent px-2 py-1 text-sm text-text-main outline-none placeholder:text-text-subtle" /> : null}
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1">
+                  {(mode === "chat" || mode === "stt") ? <button type="button" onClick={() => fileInputRef.current?.click()} className="rounded-lg p-2 text-text-muted hover:bg-surface hover:text-text-main" aria-label="Attach files"><span className="material-symbols-outlined text-[20px]">attach_file</span></button> : null}
+                  {mode === "chat" && activeSession.messages.some((message) => message.role === "assistant") ? <button type="button" onClick={regenerate} disabled={busy} className="rounded-lg p-2 text-text-muted hover:bg-surface hover:text-text-main disabled:opacity-50" aria-label="Regenerate last response"><span className="material-symbols-outlined text-[20px]">refresh</span></button> : null}
+                  <input ref={fileInputRef} type="file" multiple={mode !== "stt"} accept={inputAccept(mode)} className="hidden" onChange={handleFiles} />
                 </div>
+                {busy ? <Button variant="ghost" size="sm" icon="stop" onClick={stop}>Stop</Button> : <Button size="sm" icon="play_arrow" onClick={requestRun} disabled={!activeSession.model}>Run</Button>}
               </div>
             </div>
           </div>
+        </footer>
+      </main>
 
-          <p className="mx-auto mt-2 max-w-3xl px-4 pb-4 text-center text-[11px] text-white/30">
-            Model list is filtered from connected providers.
-          </p>
-        </div>
-      </div>
+      {mode === "embedding" && currentEmbeddingVectors ? <button type="button" onClick={() => navigator.clipboard.writeText(JSON.stringify(currentEmbeddingVectors))} className="fixed bottom-24 right-5 z-20 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-white shadow-[var(--shadow-elev)]">Copy current vectors</button> : null}
+      <ModelSelectModal isOpen={modelOpen} onClose={() => setModelOpen(false)} onSelect={(model) => { patchSession(activeSession.id, { model: model.value || model.id || model.name }); setModelOpen(false); }} selectedModel={activeSession.model} activeProviders={activeProviders} modelAliases={modelAliases} kindFilter={currentTab.kindFilter} title={`Select ${currentTab.label} model`} />
+      <PlaygroundSettingsDrawer isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} mode={mode} settings={activeSession.settings} advanced={activeSession.advanced} tools={activeSession.tools} caps={caps} thinkingLevels={thinkingLevels} onSettingsChange={(settings) => patchSession(activeSession.id, { settings })} onAdvancedChange={(advanced) => patchSession(activeSession.id, { advanced })} onToolsChange={(tools) => patchSession(activeSession.id, { tools })} errors={validation} />
+      <ConfirmModal isOpen={Boolean(confirmRun)} onClose={() => setConfirmRun(null)} onConfirm={() => { const run = confirmRun; setConfirmRun(null); setSessions((current) => current.map((session) => session.id === activeSession.id ? { ...session, confirmed: true, updatedAt: Date.now() } : session)); run?.(); }} title={`Run ${currentTab.label}?`} message={`This ${currentTab.label.toLowerCase()} request may use billable provider credits${mode === "image" && activeSession.settings.n > 1 ? ` for ${activeSession.settings.n} outputs` : ""}. This warning appears once for this conversation.`} confirmText="Run" variant="primary" />
     </div>
   );
 }

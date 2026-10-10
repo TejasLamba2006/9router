@@ -9,6 +9,7 @@ import {
   toFormData,
   createStreamState,
   splitSseEvents,
+  reduceSseBuffer,
   reduceStreamEvent,
   finalizeAssistantMessage,
   buildToolResultMessage,
@@ -116,6 +117,17 @@ describe("buildPlaygroundRequest", () => {
     expect(() => buildPlaygroundRequest({ mode: "chat", model: " ", input: { messages: [] } })).toThrow(/model/);
   });
 
+  it("clamps chat max tokens to the selected model output limit", () => {
+    const req = buildPlaygroundRequest({
+      mode: "chat",
+      model: "p/m",
+      settings: { max_tokens: 200 },
+      input: { messages: [{ role: "user", content: "hi" }] },
+      limits: { maxOutput: 128 },
+    });
+    expect(req.body.max_tokens).toBe(128);
+  });
+
   it("builds a streaming chat request with system prompt and omitted nulls", () => {
     const req = buildPlaygroundRequest({
       mode: "chat",
@@ -147,6 +159,14 @@ describe("buildPlaygroundRequest", () => {
     expect(req.body.stream_options).toBeUndefined();
   });
 
+  it("keeps the STT prompt while protecting prompt for generation modes", () => {
+    const req = buildPlaygroundRequest({
+      mode: "stt", model: "m", settings: { prompt: "names: Ada" }, input: { file: new Blob(["a"]) },
+    });
+    expect(req.formFields.find((field) => field.name === "prompt")?.value).toBe("names: Ada");
+    expect(buildPlaygroundRequest({ mode: "image", model: "m", settings: { prompt: "wrong" }, input: { prompt: "right" } }).body.prompt).toBe("right");
+  });
+
   it("rejects chat without messages", () => {
     expect(() => buildPlaygroundRequest({ mode: "chat", model: "m", input: { messages: [] } })).toThrow(/message/);
   });
@@ -171,9 +191,16 @@ describe("buildPlaygroundRequest", () => {
 
   it("builds a tts request expecting a blob", () => {
     const req = buildPlaygroundRequest({ mode: "tts", model: "openai/tts-1", input: { text: "hello" } });
-    expect(req).toMatchObject({ path: "/api/v1/audio/speech", bodyType: "json", responseType: "blob" });
+    expect(req).toMatchObject({ path: "/api/v1/audio/speech?response_format=mp3", bodyType: "json", responseType: "blob" });
     expect(req.body).toMatchObject({ model: "openai/tts-1", input: "hello", response_format: "mp3" });
     expect(() => buildPlaygroundRequest({ mode: "tts", model: "m", input: { text: "" } })).toThrow(/text/);
+  });
+
+  it("never lets settings or Advanced JSON override the TTS voice encoded in model", () => {
+    const req = buildPlaygroundRequest({ mode: "tts", model: "openai/tts-1/alloy", settings: { voice: "nova" }, input: { text: "hello" }, advanced: { voice: "echo" } });
+    expect(req.body.model).toBe("openai/tts-1/alloy");
+    expect(req.body.voice).toBeUndefined();
+    expect(req.ignored).toContain("voice");
   });
 
   it("builds an stt multipart spec with the file last-protected", () => {
@@ -250,11 +277,11 @@ describe("buildPlaygroundRequest", () => {
 });
 
 describe("buildVideoPollRequest", () => {
-  it("encodes the job id and pins the connection", () => {
-    expect(buildVideoPollRequest("a/b?c", "conn-1")).toEqual({
+  it("encodes the job id and forwards the opaque poll token", () => {
+    expect(buildVideoPollRequest("a/b?c", "poll-token")).toEqual({
       method: "GET",
       path: "/api/v1/videos/a%2Fb%3Fc",
-      headers: { "x-connection-id": "conn-1" },
+      headers: { "x-playground-video-token": "poll-token" },
       bodyType: "none",
       responseType: "json",
     });
@@ -293,6 +320,12 @@ describe("SSE parsing", () => {
     const r = splitSseEvents(": ping\r\n\r\nevent: x\r\ndata: one\r\ndata: two\r\n\r\ndata:[DONE]\n\n");
     expect(r.events).toEqual(["one\ntwo", "[DONE]"]);
     expect(r.rest).toBe("");
+  });
+
+  it("reduces a final SSE event without a trailing blank line", () => {
+    const reduced = reduceSseBuffer(createStreamState(), 'data: {"choices":[{"delta":{"content":"tail"}}]}', true);
+    expect(reduced.state.content).toBe("tail");
+    expect(reduced.rest).toBe("");
   });
 });
 
@@ -432,12 +465,12 @@ describe("normalizeResponse", () => {
   it("normalises image urls and base64", () => {
     const r = normalizeResponse("image", { data: [
       { url: "https://x/a.png", revised_prompt: "rp" },
-      { b64_json: "AAAA" },
+      { b64_json: "AAAA", output_format: "webp" },
       { nothing: true },
     ] });
     expect(r).toEqual({ kind: "image", images: [
       { src: "https://x/a.png", revisedPrompt: "rp" },
-      { src: "data:image/png;base64,AAAA", revisedPrompt: null },
+      { src: "data:image/webp;base64,AAAA", revisedPrompt: null },
     ] });
   });
 

@@ -89,7 +89,7 @@ function capUtf8(bytes, originalBytes, maxBytes) {
   return { text, truncated: true, originalBytes };
 }
 
-const defaultLoadParser = async () => (await import("officeparser")).parseOffice;
+const defaultLoadParser = async () => (await import("officeparser/slim")).parseOffice;
 
 export async function extractAttachmentText(file, { kind, signal, loadParser = defaultLoadParser, limits = ATTACHMENT_LIMITS } = {}) {
   throwIfAborted(signal);

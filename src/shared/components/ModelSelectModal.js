@@ -150,10 +150,13 @@ export default function ModelSelectModal({
     if (!kindFilter) return activeProviders;
     return activeProviders.filter((connection) => {
       const matchedNode = providerNodes.find((node) => node.id === connection.provider);
-      const kinds = matchedNode?.serviceKinds
+      const mediaKinds = matchedNode?.serviceKinds
         || connection.providerSpecificData?.serviceKinds
         || AI_PROVIDERS[connection.provider]?.serviceKinds
-        || ["llm"];
+        || [];
+      const kinds = (isOpenAICompatibleProvider(connection.provider) || isAnthropicCompatibleProvider(connection.provider))
+        ? ["llm", ...mediaKinds]
+        : (mediaKinds.length ? mediaKinds : ["llm"]);
       return kinds.includes(kindFilter);
     });
   }, [activeProviders, providerNodes, kindFilter]);
@@ -208,7 +211,7 @@ export default function ModelSelectModal({
       // No kindFilter means the LLM selector. Keep custom models visible because
       // user-added models may have typed capabilities (for example imageToText)
       // while still being valid chat/combo targets.
-      if (!kindFilter) return models.filter((m) => m.isPlaceholder || m.isCustom || !getModelKind(m) || getModelKind(m) === "llm");
+      if (!kindFilter) return models.filter((m) => m.isPlaceholder || !getModelKind(m) || ["llm", "imageToText"].includes(getModelKind(m)));
       if (!TYPED_KINDS.has(kindFilter)) return models;
       return models.filter((m) => m.isPlaceholder || getModelKind(m) === kindFilter);
     };
@@ -221,17 +224,16 @@ export default function ModelSelectModal({
       ? NO_AUTH_PROVIDER_IDS.filter((id) => (AI_PROVIDERS[id]?.serviceKinds || ["llm"]).includes(kindFilter))
       : NO_AUTH_PROVIDER_IDS;
 
-    // Compatible nodes (OpenAI/Anthropic Compatible) that already have user-added
-    // custom models should be selectable even without an API-key connection. Local /
-    // self-hosted endpoints (Ollama, internal relays, etc.) don't always need a stored
-    // key, so gating on connections hides models the user already added. These nodes
-    // are LLM-only, so only surface them when no kind filter is active.
-    // See #4177, #2113, #2119, #1988.
-    const compatibleNodeIds = kindFilter
-      ? []
-      : customModels
-          .map((m) => m.providerAlias)
-          .filter((alias) => isOpenAICompatibleProvider(alias) || isAnthropicCompatibleProvider(alias));
+    // Compatible nodes with user-added models remain selectable without a stored
+    // API-key connection. Typed selectors only include nodes with a matching model.
+    const compatibleNodeIds = customModels
+      .filter((model) => {
+        const compatible = isOpenAICompatibleProvider(model.providerAlias) || isAnthropicCompatibleProvider(model.providerAlias);
+        if (!compatible) return false;
+        const kind = getModelKind(model) || "llm";
+        return kindFilter ? kind === kindFilter : ["llm", "imageToText"].includes(kind);
+      })
+      .map((model) => model.providerAlias);
 
     // Only show connected providers (including both standard and custom)
     const providerIdsToShow = new Set([
@@ -350,7 +352,7 @@ export default function ModelSelectModal({
           }));
         const typedCustom = kindFilter && TYPED_KINDS.has(kindFilter)
           ? registeredCustom.filter((m) => getModelKind(m) === kindFilter)
-          : registeredCustom.filter((m) => !getModelKind(m) || getModelKind(m) === "llm");
+          : registeredCustom.filter((m) => !getModelKind(m) || ["llm", "imageToText"].includes(getModelKind(m)));
         const baseModels = kindFilter && TYPED_KINDS.has(kindFilter) ? [] : nodeModels;
         const seen = new Set(baseModels.map((m) => m.value));
         const mergedModels = [...baseModels, ...typedCustom.filter((m) => !seen.has(m.value))];
@@ -398,7 +400,7 @@ export default function ModelSelectModal({
         const customAliasIds = new Set(customAliasModels.map((m) => m.id));
         const customRegisteredModels = customModels
           .filter((m) => m.providerAlias === alias && !hardcodedIds.has(m.id) && !customAliasIds.has(m.id))
-          .map((m) => ({ id: m.id, name: m.name || m.id, value: `${alias}/${m.id}`, isCustom: true }));
+          .map((m) => ({ id: m.id, name: m.name || m.id, value: `${alias}/${m.id}`, kind: getModelKind(m), isCustom: true }));
 
         const merged = [
           ...hardcodedModels.map((m) => ({ id: m.id, name: m.name, value: `${alias}/${m.id}`, kind: getModelKind(m) })),
@@ -446,7 +448,7 @@ export default function ModelSelectModal({
     });
 
     return groups;
-  }, [filteredActiveProviders, modelAliases, allProviders, providerNodes, customModels, disabledModels, kindFilter, activeProviders, cursorModels, clineModels, clinepassModels]);
+  }, [filteredActiveProviders, modelAliases, allProviders, providerNodes, customModels, disabledModels, kindFilter, activeProviders, cursorModels, clineModels, clinepassModels, zedModels]);
 
   // Filter combos by search query (and hide combos when kindFilter is set — combos are LLM-only by design)
   const filteredCombos = useMemo(() => {
@@ -454,14 +456,7 @@ export default function ModelSelectModal({
     if (!searchQuery.trim()) return combos;
     const query = searchQuery.toLowerCase();
     return combos.filter(c => c.name.toLowerCase().includes(query));
-  }, [combos, searchQuery, kindFilter]);
-
-  // Sort models alphabetically, with added models floated to top
-  const sortModels = (models) => {
-    const added = models.filter(m => addedModelValues.includes(m.value)).sort((a, b) => a.name.localeCompare(b.name));
-    const rest = models.filter(m => !addedModelValues.includes(m.value)).sort((a, b) => a.name.localeCompare(b.name));
-    return [...added, ...rest];
-  };
+  }, [combos, searchQuery, kindFilter, capFilter]);
 
   // Filter models by search query
   const filteredGroups = useMemo(() => {
@@ -484,14 +479,16 @@ export default function ModelSelectModal({
         );
         if (models.length === 0 && !providerNameMatches) return;
       }
+      const added = models.filter((model) => addedModelValues.includes(model.value)).sort((a, b) => a.name.localeCompare(b.name));
+      const rest = models.filter((model) => !addedModelValues.includes(model.value)).sort((a, b) => a.name.localeCompare(b.name));
       filtered[providerId] = {
         ...group,
-        models: sortModels(models),
+        models: [...added, ...rest],
       };
     });
 
     return filtered;
-  }, [groupedModels, searchQuery, addedModelValues]);
+  }, [groupedModels, searchQuery, addedModelValues, capFilter, getCaps]);
 
   const handleSelect = (model) => {
     const value = model?.value || model?.name || model;
@@ -678,6 +675,7 @@ ModelSelectModal.propTypes = {
   title: PropTypes.string,
   modelAliases: PropTypes.object,
   kindFilter: PropTypes.string,
+  capFilter: PropTypes.string,
   addedModelValues: PropTypes.arrayOf(PropTypes.string),
   closeOnSelect: PropTypes.bool,
 };

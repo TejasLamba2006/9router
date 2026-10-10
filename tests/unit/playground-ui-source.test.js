@@ -25,11 +25,9 @@ describe("Playground dashboard wiring", () => {
     expect(page).toContain("PlaygroundModeTabs");
     expect(page).toContain("PlaygroundSettingsDrawer");
     expect(page).toContain("ConversationRail");
-    expect(page).toContain("ToolCallCard");
     expect(page).toContain("preparePlaygroundAttachments");
-    expect(page).toContain("/api/dashboard/playground/");
     expect(page).toContain("buildPlaygroundRequest");
-    expect(page).toContain("reduceStreamEvent");
+    expect(page).toContain("reduceSseBuffer");
     expect(page).toContain("ConfirmModal");
   });
 
@@ -52,5 +50,9 @@ describe("Playground dashboard wiring", () => {
     // No HTML injection: model output renders as plain pre-wrap text.
     expect(all).not.toContain("dangerouslySetInnerHTML");
     expect(all).toContain("whitespace-pre-wrap");
+    expect(all).toContain("Continue with tool results");
+    expect(all).toContain("Copy current vectors");
+    expect(all).toContain("Regenerate last response");
+    expect(all).toContain("Edit and retry");
   });
 });

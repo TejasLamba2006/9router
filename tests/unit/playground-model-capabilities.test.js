@@ -4,7 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getModelAliases: vi.fn(),
   getCustomModels: vi.fn(),
-  getDisabledModels: vi.fn(),
+  createModelVisibilitySnapshot: vi.fn(),
+  isModelDisabled: vi.fn(),
   getCapabilitiesForModel: vi.fn(),
 }));
 
@@ -18,8 +19,9 @@ vi.mock("@/models", () => ({
   setModelAlias: vi.fn(),
 }));
 
-vi.mock("@/lib/disabledModelsDb", () => ({
-  getDisabledModels: mocks.getDisabledModels,
+vi.mock("@/sse/services/modelVisibility", () => ({
+  createModelVisibilitySnapshot: mocks.createModelVisibilitySnapshot,
+  isModelDisabled: mocks.isModelDisabled,
 }));
 
 vi.mock("@/shared/constants/config", () => ({
@@ -57,7 +59,8 @@ describe("Playground model capability metadata", () => {
     vi.clearAllMocks();
     mocks.getModelAliases.mockResolvedValue({});
     mocks.getCustomModels.mockResolvedValue([]);
-    mocks.getDisabledModels.mockResolvedValue({});
+    mocks.createModelVisibilitySnapshot.mockResolvedValue({});
+    mocks.isModelDisabled.mockResolvedValue(false);
     mocks.getCapabilitiesForModel.mockReturnValue(canonicalCaps);
   });
 
@@ -103,6 +106,10 @@ describe("ModelSelectModal typed compatible providers", () => {
   it("uses compatible-node serviceKinds when filtering active providers", () => {
     expect(source).toMatch(/matchedNode\?\.serviceKinds/);
     expect(source).toMatch(/providerSpecificData\?\.serviceKinds/);
+  });
+
+  it("keeps compatible LLM models in Chat even when the node also declares media kinds", () => {
+    expect(source).toMatch(/\["llm", \.\.\.mediaKinds\]/);
   });
 
   it("filters registered compatible models by their declared kind", () => {

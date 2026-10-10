@@ -1,4 +1,3 @@
-import { getSettings } from "@/lib/localDb";
 import { getInternalHeaders } from "@/lib/internalApiAuth.js";
 import {
   createPlaygroundVideoToken,
@@ -143,7 +142,9 @@ async function parseAndValidateBody(request, config, body) {
 async function validateModel(model, kind) {
   if (typeof model !== "string" || !model.trim()) return false;
   const models = await buildModelsList([kind]);
-  return models.some((entry) => entry?.id === model);
+  if (models.some((entry) => entry?.id === model)) return true;
+  if (kind !== "tts") return false;
+  return models.some((entry) => typeof entry?.id === "string" && model.startsWith(`${entry.id}/`));
 }
 
 function responseWithoutConnectionId(response, token = null) {
@@ -194,9 +195,8 @@ export async function dispatchPlaygroundRequest(request, operationParts) {
   if (request.method !== expectedMethod) return jsonError("Method not allowed", 405, { Allow: expectedMethod });
   if (request.method === "POST" && !sameOrigin(request)) return jsonError("Origin not allowed", 403);
 
-  const trustedHeaders = await getInternalHeaders({ contentType: null });
-  const settings = await getSettings().catch(() => null);
-  if (settings?.requireApiKey && !trustedHeaders.Authorization) {
+  const trustedHeaders = await getInternalHeaders({ contentType: null, allowRestrictedFallback: false });
+  if (!trustedHeaders.Authorization) {
     return jsonError("No active unrestricted API key is available for Playground", 503);
   }
 
@@ -216,8 +216,11 @@ export async function dispatchPlaygroundRequest(request, operationParts) {
   }
 
   let path = config.path;
-  if (operation === "tts" && typeof parsed.parsed?.response_format === "string" && /^[a-z0-9_-]{1,32}$/i.test(parsed.parsed.response_format)) {
-    path += `?response_format=${encodeURIComponent(parsed.parsed.response_format)}`;
+  if (operation === "tts") {
+    const requestedFormat = parsed.parsed?.response_format || new URL(request.url).searchParams.get("response_format");
+    if (typeof requestedFormat === "string" && /^[a-z0-9_-]{1,32}$/i.test(requestedFormat)) {
+      path += `?response_format=${encodeURIComponent(requestedFormat)}`;
+    }
   }
   const headers = copySafeHeaders(request, trustedHeaders, parsed.contentType);
   const forwarded = internalRequest(request, path, headers, body);

@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getInternalHeaders: vi.fn(),
-  getSettings: vi.fn(),
   createPlaygroundVideoToken: vi.fn(),
   verifyPlaygroundVideoToken: vi.fn(),
   buildModelsList: vi.fn(),
@@ -17,7 +16,6 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/internalApiAuth.js", () => ({ getInternalHeaders: mocks.getInternalHeaders }));
-vi.mock("@/lib/localDb", () => ({ getSettings: mocks.getSettings }));
 vi.mock("@/lib/auth/playgroundVideoToken.js", () => ({
   createPlaygroundVideoToken: mocks.createPlaygroundVideoToken,
   verifyPlaygroundVideoToken: mocks.verifyPlaygroundVideoToken,
@@ -45,7 +43,6 @@ const jsonRequest = (path, body, headers = {}, method = "POST") => new Request(`
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.getInternalHeaders.mockResolvedValue({ Authorization: "Bearer internal", "x-9r-cli-token": "machine" });
-  mocks.getSettings.mockResolvedValue({ requireApiKey: true });
   mocks.buildModelsList.mockImplementation(async (kinds) => [{ id: `${kinds[0]}/model` }]);
   for (const handler of [mocks.chat, mocks.image, mocks.tts, mocks.stt, mocks.embedding]) {
     handler.mockResolvedValue(Response.json({ ok: true }));
@@ -111,7 +108,7 @@ describe("Playground dashboard gateway", () => {
     expect(mocks.initTranslators).toHaveBeenCalledOnce();
   });
 
-  it("requires an unrestricted internal key when API key enforcement is enabled", async () => {
+  it("requires an unrestricted internal key for every Playground request", async () => {
     mocks.getInternalHeaders.mockResolvedValue({ "x-9r-cli-token": "machine" });
     const response = await dispatchPlaygroundRequest(
       jsonRequest("/api/dashboard/playground/chat", { model: "llm/model", messages: [] }),
@@ -141,6 +138,16 @@ describe("Playground dashboard gateway", () => {
     expect(mocks.image).not.toHaveBeenCalled();
   });
 
+  it("accepts a voice suffix on an inventoried TTS model", async () => {
+    mocks.buildModelsList.mockResolvedValue([{ id: "tts/model" }]);
+    const response = await dispatchPlaygroundRequest(
+      jsonRequest("/api/dashboard/playground/tts", { model: "tts/model/alloy", input: "hello" }),
+      ["tts"],
+    );
+    expect(response.status).toBe(200);
+    expect(mocks.tts).toHaveBeenCalledOnce();
+  });
+
   it("preserves TTS response_format through the internal query", async () => {
     mocks.buildModelsList.mockResolvedValue([{ id: "tts/model" }]);
     mocks.tts.mockImplementation(async (request) => Response.json({ search: new URL(request.url).search }));
@@ -149,6 +156,12 @@ describe("Playground dashboard gateway", () => {
       ["tts"],
     );
     expect(await response.json()).toEqual({ search: "?response_format=json" });
+
+    const queryResponse = await dispatchPlaygroundRequest(
+      jsonRequest("/api/dashboard/playground/tts?response_format=wav", { model: "tts/model", input: "hello" }),
+      ["tts"],
+    );
+    expect(await queryResponse.json()).toEqual({ search: "?response_format=wav" });
   });
 
   it("preserves multipart fields and enforces file-count limits", async () => {

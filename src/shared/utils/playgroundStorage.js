@@ -144,6 +144,9 @@ export function collectAttachmentIds(sessions) {
   for (const session of sessions || []) {
     for (const message of session?.messages || []) {
       for (const attachment of message?.attachments || []) if (attachment?.id) ids.add(attachment.id);
+      if (message?.result?.blobId) ids.add(message.result.blobId);
+      for (const item of message?.result?.images || []) if (item?.blobId) ids.add(item.blobId);
+      for (const item of message?.result?.videos || []) if (item?.blobId) ids.add(item.blobId);
     }
   }
   return ids;
@@ -190,8 +193,9 @@ export async function migrateBasicChatSessions({ storage = browserStorage(), blo
 }
 
 // Call after removing `session`; deletes blobs that no remaining session references.
-export async function releaseSessionBlobs({ blobStore, session, remainingSessions = [] }) {
+export async function releaseSessionBlobs({ blobStore, session, remainingSessions = [], keepIds = [] }) {
   const stillUsed = collectAttachmentIds(remainingSessions);
+  for (const id of keepIds) stillUsed.add(id);
   const deleted = [];
   for (const id of collectAttachmentIds([session])) {
     if (stillUsed.has(id)) continue;

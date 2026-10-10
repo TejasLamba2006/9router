@@ -1,6 +1,7 @@
 // Pure UI helpers for the Unified Playground page. No React, no fetch, no DOM.
 import { getDefaultSettings, PLAYGROUND_MODES } from "@/shared/utils/playgroundRequest";
 import { createAttachmentRecord, validateAttachmentBatch } from "@/shared/utils/playgroundAttachments";
+import { dataUrlToBlob } from "@/shared/utils/playgroundStorage";
 
 export const MODE_TABS = [
   { mode: "chat", label: "Chat", icon: "chat", kindFilter: null },
@@ -29,9 +30,10 @@ const OPERATIONS = {
 };
 
 export function toDashboardPath(path) {
-  if (OPERATIONS[path]) return `${DASHBOARD_BASE}/${OPERATIONS[path]}`;
-  const poll = /^\/api\/v1\/videos\/([^/]+)$/.exec(path);
-  if (poll) return `${DASHBOARD_BASE}/video/${poll[1]}`; // already encodeURIComponent'd by the builder
+  const [pathname, query] = String(path).split(/\?(.*)/s);
+  if (OPERATIONS[pathname]) return `${DASHBOARD_BASE}/${OPERATIONS[pathname]}${query ? `?${query}` : ""}`;
+  const poll = /^\/api\/v1\/videos\/([^/]+)$/.exec(pathname);
+  if (poll && !query) return `${DASHBOARD_BASE}/video/${poll[1]}`; // already encodeURIComponent'd by the builder
   throw new Error(`No dashboard playground operation for ${path}`);
 }
 
@@ -87,7 +89,11 @@ export function toApiMessages(messages, dataUrls = {}) {
       if (m.status === "error" || m.status === "streaming") continue;
       const calls = Array.isArray(m.tool_calls) && m.tool_calls.length ? m.tool_calls : null;
       if (!calls && !m.content) continue;
-      out.push(calls ? { role: "assistant", content: m.content ?? null, tool_calls: calls } : { role: "assistant", content: m.content });
+      const message = calls
+        ? { role: "assistant", content: m.content ?? null, tool_calls: calls }
+        : { role: "assistant", content: m.content };
+      if (m.reasoning_content) message.reasoning_content = m.reasoning_content;
+      out.push(message);
     } else if (m.role === "tool") {
       out.push({ role: "tool", tool_call_id: m.tool_call_id, content: m.content ?? "" });
     }
@@ -98,7 +104,15 @@ export function toApiMessages(messages, dataUrls = {}) {
 export function trimTrailingAssistant(messages) {
   const out = [...messages];
   while (out.length && out[out.length - 1].role === "assistant") out.pop();
+  if (!out.length || out[out.length - 1].role !== "tool") return out;
+  while (out.length && out[out.length - 1].role === "tool") out.pop();
+  if (out[out.length - 1]?.role === "assistant" && out[out.length - 1].tool_calls?.length) out.pop();
   return out;
+}
+
+export function trimFromUserMessage(messages, messageId) {
+  const index = (messages || []).findIndex((message) => message.id === messageId && message.role === "user");
+  return index === -1 ? [...(messages || [])] : messages.slice(0, index);
 }
 
 /** Tool calls from the latest assistant turn that have no tool result yet. */
@@ -111,6 +125,28 @@ export function pendingToolCalls(messages) {
     return m.tool_calls.filter((c) => c?.id && !answered.has(c.id));
   }
   return [];
+}
+
+export function applyToolResult(messages, result) {
+  const existing = (messages || []).findIndex((message) => message.role === "tool" && message.tool_call_id === result.tool_call_id);
+  if (existing === -1) return [...(messages || []), result];
+  return messages.map((message, index) => index === existing ? result : message);
+}
+
+export function toolContinuationMessageId(messages) {
+  let assistant = null;
+  const answered = new Set();
+  for (let index = (messages || []).length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.role === "tool") {
+      answered.add(message.tool_call_id);
+      continue;
+    }
+    if (message.role === "assistant" && message.tool_calls?.length) assistant = message;
+    break;
+  }
+  if (!assistant || assistant.tool_calls.some((call) => !answered.has(call.id))) return null;
+  return assistant.id || null;
 }
 
 export function parseToolsJson(text) {
@@ -128,7 +164,7 @@ export function pendingVideoJobs(sessions) {
   for (const s of sessions || []) {
     for (const m of s.messages || []) {
       if (m.result?.kind === "video" && !m.result.done && m.job?.id) {
-        jobs.push({ sessionId: s.id, messageId: m.id, jobId: m.job.id, connectionId: m.job.connectionId ?? null });
+        jobs.push({ sessionId: s.id, messageId: m.id, jobId: m.job.id, pollToken: m.job.pollToken ?? null });
       }
     }
   }
@@ -176,6 +212,106 @@ export function normalizeLoadedSession(raw) {
       ...(m.status === "streaming" ? { status: "stopped" } : {}),
     })),
   };
+}
+
+export function validateChatAttachments(attachments, caps = {}) {
+  const errors = [];
+  const prepared = (attachments || []).map((attachment) => {
+    if (attachment.kind === "image" && caps.vision !== true) {
+      errors.push(`${attachment.name} needs a vision-capable model`);
+    } else if (attachment.kind === "audio" && caps.audioInput !== true) {
+      errors.push(`${attachment.name} needs an audio-input-capable model`);
+    } else if (attachment.kind === "pdf" && caps.pdf !== true) {
+      if (attachment.text) return { ...attachment, native: false };
+      errors.push(`${attachment.name} needs a PDF-capable model or extractable text`);
+    }
+    return attachment;
+  });
+  return { attachments: prepared, errors };
+}
+
+export function primaryInputForMode(mode, draft, attachments) {
+  if (mode === "image" || mode === "video") return { prompt: draft };
+  if (mode === "tts" || mode === "embedding") return { text: draft };
+  if (mode === "stt") {
+    const audio = attachments?.find((attachment) => attachment.kind === "audio" || attachment.blob);
+    return { file: audio?.blob, fileName: audio?.name };
+  }
+  return {};
+}
+
+export async function persistGeneratedResult(result, blobStore, fetchBlob = async (url, options) => {
+  const response = await fetch(url, options);
+  if (!response.ok) throw new Error(`Media download failed (${response.status})`);
+  return response.blob();
+}) {
+  if (!result || !blobStore) return result;
+  if (result.kind === "audio" && result.blob) {
+    const blobId = newId();
+    await blobStore.put(blobId, result.blob);
+    const { blob, src, ...rest } = result;
+    return { ...rest, blobId, mimeType: blob.type || result.mimeType };
+  }
+  if (result.kind === "image") {
+    const images = [];
+    for (const image of result.images || []) {
+      let blob = image.src?.startsWith?.("data:") ? dataUrlToBlob(image.src) : null;
+      if (!blob && /^https?:/i.test(image.src || "")) {
+        try {
+          blob = await fetchBlob(image.src, { credentials: "omit", referrerPolicy: "no-referrer" });
+        } catch {
+          // CORS or expired URL: keep remote source as fallback.
+        }
+      }
+      if (!blob) { images.push(image); continue; }
+      const blobId = newId();
+      await blobStore.put(blobId, blob);
+      const { src, ...rest } = image;
+      images.push({ ...rest, blobId, mimeType: blob.type });
+    }
+    return { ...result, images };
+  }
+  if (result.kind === "video") {
+    const videos = [];
+    for (const video of result.videos || []) {
+      if (typeof video !== "string" || !/^https?:/i.test(video)) { videos.push(video); continue; }
+      try {
+        const blob = await fetchBlob(video, { credentials: "omit", referrerPolicy: "no-referrer" });
+        const blobId = newId();
+        await blobStore.put(blobId, blob);
+        videos.push({ blobId, mimeType: blob.type });
+      } catch {
+        videos.push(video);
+      }
+    }
+    return { ...result, videos };
+  }
+  return result;
+}
+
+export async function hydrateGeneratedResult(result, blobStore, createObjectUrl = URL.createObjectURL) {
+  if (!result || !blobStore) return result;
+  if (result.kind === "audio" && result.blobId) {
+    const blob = await blobStore.get(result.blobId);
+    return blob ? { ...result, src: createObjectUrl(blob) } : result;
+  }
+  if (result.kind === "image") {
+    const images = await Promise.all((result.images || []).map(async (image) => {
+      if (!image.blobId) return image;
+      const blob = await blobStore.get(image.blobId);
+      return blob ? { ...image, src: createObjectUrl(blob) } : image;
+    }));
+    return { ...result, images };
+  }
+  if (result.kind === "video") {
+    const videos = await Promise.all((result.videos || []).map(async (video) => {
+      if (!video?.blobId) return video;
+      const blob = await blobStore.get(video.blobId);
+      return blob ? createObjectUrl(blob) : video;
+    }));
+    return { ...result, videos };
+  }
+  return result;
 }
 
 // Media from model output: only network, blob and inline media URLs. Blocks javascript: and friends.

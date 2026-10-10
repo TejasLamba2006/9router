@@ -7,12 +7,19 @@ import {
   sessionTitle,
   toApiMessages,
   trimTrailingAssistant,
+  trimFromUserMessage,
   pendingToolCalls,
   parseToolsJson,
   pendingVideoJobs,
   preparePlaygroundAttachments,
   normalizeLoadedSession,
   safeMediaSrc,
+  validateChatAttachments,
+  primaryInputForMode,
+  persistGeneratedResult,
+  hydrateGeneratedResult,
+  applyToolResult,
+  toolContinuationMessageId,
 } from "../../src/app/(dashboard)/dashboard/basic-chat/playgroundUi.js";
 import { createMemoryBlobStore } from "../../src/shared/utils/playgroundStorage.js";
 import { buildPlaygroundRequest, buildVideoPollRequest, PLAYGROUND_MODES } from "../../src/shared/utils/playgroundRequest.js";
@@ -52,8 +59,12 @@ describe("dashboard proxy paths", () => {
       video: buildPlaygroundRequest({ mode: "video", model: "m", input: { prompt: "p" } }).path,
     };
     for (const [mode, path] of Object.entries(paths)) {
-      expect(toDashboardPath(path)).toBe(`/api/dashboard/playground/${mode}`);
+      expect(toDashboardPath(path).split("?")[0]).toBe(`/api/dashboard/playground/${mode}`);
     }
+  });
+
+  it("preserves allowed query parameters while mapping operations", () => {
+    expect(toDashboardPath("/api/v1/audio/speech?response_format=wav")).toBe("/api/dashboard/playground/tts?response_format=wav");
   });
 
   it("maps video polling and keeps the job id encoded", () => {
@@ -111,13 +122,19 @@ describe("toApiMessages", () => {
         { type: "file", file: { filename: "report.pdf", file_data: "data:application/pdf;base64,UERG" } },
         { type: "text", text: "--- report.docx ---\nExtracted document" },
       ] },
-      { role: "assistant", content: null, tool_calls: [{ id: "c1", type: "function", function: { name: "f", arguments: "{}" } }] },
+      { role: "assistant", content: null, tool_calls: [{ id: "c1", type: "function", function: { name: "f", arguments: "{}" } }], reasoning_content: "thinking" },
       { role: "tool", tool_call_id: "c1", content: "42" },
     ]);
   });
 
   it("keeps plain string content when there are no usable attachments", () => {
     expect(toApiMessages([{ role: "user", content: "hi", attachments: [{ id: "x", kind: "image" }] }], {})).toEqual([{ role: "user", content: "hi" }]);
+  });
+
+  it("does not send a PDF natively when it was downgraded to extracted text", () => {
+    expect(toApiMessages([{ role: "user", content: "", attachments: [{ id: "p", kind: "pdf", name: "report.pdf", native: false, text: "contents" }] }], { p: "data:application/pdf;base64,UERG" })).toEqual([
+      { role: "user", content: [{ type: "text", text: "--- report.pdf ---\ncontents" }] },
+    ]);
   });
 });
 
@@ -128,12 +145,47 @@ describe("regenerate / tool flow", () => {
     expect(trimTrailingAssistant([{ role: "user" }])).toHaveLength(1);
   });
 
+  it("trims history at an edited user message", () => {
+    const msgs = [{ id: "u1", role: "user" }, { role: "assistant" }, { id: "u2", role: "user" }, { role: "assistant" }];
+    expect(trimFromUserMessage(msgs, "u2")).toEqual(msgs.slice(0, 2));
+    expect(trimFromUserMessage(msgs, "missing")).toEqual(msgs);
+  });
+
+  it("drops tool results and their requesting assistant before regenerating", () => {
+    const msgs = [
+      { role: "user", content: "weather" },
+      { role: "assistant", tool_calls: [{ id: "c1" }] },
+      { role: "tool", tool_call_id: "c1", content: "sunny" },
+      { role: "assistant", content: "It is sunny" },
+    ];
+    expect(trimTrailingAssistant(msgs)).toEqual([msgs[0]]);
+  });
+
   it("lists tool calls of the last assistant turn still awaiting a result", () => {
     const call = (id) => ({ id, type: "function", function: { name: "f", arguments: "{}" } });
     const msgs = [{ role: "user" }, { role: "assistant", tool_calls: [call("a"), call("b")] }, { role: "tool", tool_call_id: "a", content: "" }];
     expect(pendingToolCalls(msgs).map((c) => c.id)).toEqual(["b"]);
     expect(pendingToolCalls([...msgs, { role: "tool", tool_call_id: "b", content: "" }])).toEqual([]);
     expect(pendingToolCalls([{ role: "user" }])).toEqual([]);
+  });
+
+  it("replaces a tool result instead of duplicating it", () => {
+    const messages = [{ role: "tool", tool_call_id: "a", content: "old" }];
+    expect(applyToolResult(messages, { role: "tool", tool_call_id: "a", content: "new" })).toEqual([
+      { role: "tool", tool_call_id: "a", content: "new" },
+    ]);
+    expect(applyToolResult(messages, { role: "tool", tool_call_id: "b", content: "next" })).toHaveLength(2);
+  });
+
+  it("offers continuation only for the latest fully answered tool-call turn", () => {
+    const call = { id: "c1", type: "function", function: { name: "f", arguments: "{}" } };
+    const messages = [
+      { id: "old", role: "assistant", tool_calls: [call] },
+      { role: "tool", tool_call_id: "c1", content: "ok" },
+      { id: "latest", role: "assistant", content: "done" },
+    ];
+    expect(toolContinuationMessageId(messages)).toBeNull();
+    expect(toolContinuationMessageId(messages.slice(0, 2))).toBe("old");
   });
 });
 
@@ -192,12 +244,12 @@ describe("pendingVideoJobs", () => {
   it("finds unfinished video jobs so polling can resume after reload", () => {
     const sessions = [
       { id: "s1", messages: [
-        { id: "m1", role: "assistant", result: { kind: "video", id: "j1", done: false }, job: { id: "j1", connectionId: "c" } },
+        { id: "m1", role: "assistant", result: { kind: "video", id: "j1", done: false }, job: { id: "j1", pollToken: "token" } },
         { id: "m2", role: "assistant", result: { kind: "video", id: "j2", done: true }, job: { id: "j2" } },
       ] },
       { id: "s2", messages: [{ id: "m3", role: "assistant", result: { kind: "image" } }] },
     ];
-    expect(pendingVideoJobs(sessions)).toEqual([{ sessionId: "s1", messageId: "m1", jobId: "j1", connectionId: "c" }]);
+    expect(pendingVideoJobs(sessions)).toEqual([{ sessionId: "s1", messageId: "m1", jobId: "j1", pollToken: "token" }]);
   });
 });
 
@@ -209,5 +261,81 @@ describe("safeMediaSrc", () => {
     expect(safeMediaSrc("javascript:alert(1)")).toBeNull();
     expect(safeMediaSrc("data:image/svg+xml,<svg/>")).toBeNull();
     expect(safeMediaSrc("data:text/html,<b>")).toBeNull();
+  });
+});
+
+describe("attachment capability checks", () => {
+  const attachments = [
+    { name: "photo.png", kind: "image" },
+    { name: "voice.mp3", kind: "audio" },
+    { name: "report.pdf", kind: "pdf", text: "fallback" },
+  ];
+
+  it("blocks native inputs unsupported by the selected chat model", () => {
+    expect(validateChatAttachments(attachments, { vision: false, audioInput: true, pdf: true }).errors).toEqual([
+      "photo.png needs a vision-capable model",
+    ]);
+    expect(validateChatAttachments(attachments, { vision: true, audioInput: false, pdf: true }).errors).toEqual([
+      "voice.mp3 needs an audio-input-capable model",
+    ]);
+  });
+
+  it("uses extracted PDF fallback without native PDF support", () => {
+    const native = { name: "report.pdf", kind: "pdf", text: "fallback" };
+    const prepared = validateChatAttachments([native], { pdf: false });
+    expect(prepared.errors).toEqual([]);
+    expect(prepared.attachments[0]).toMatchObject({ native: false, text: "fallback" });
+  });
+
+  it("rejects a PDF when neither native input nor extracted text is available", () => {
+    const prepared = validateChatAttachments([{ name: "scan.pdf", kind: "pdf", text: "" }], { pdf: false });
+    expect(prepared.errors).toEqual(["scan.pdf needs a PDF-capable model or extractable text"]);
+  });
+});
+
+describe("mode inputs", () => {
+  it("maps each non-chat mode to its primary input", () => {
+    expect(primaryInputForMode("image", "draw", [])).toEqual({ prompt: "draw" });
+    expect(primaryInputForMode("tts", "speak", [])).toEqual({ text: "speak" });
+    expect(primaryInputForMode("embedding", "embed", [])).toEqual({ text: "embed" });
+    expect(primaryInputForMode("stt", "", [{ blob: "audio", name: "voice.mp3" }])).toEqual({ file: "audio", fileName: "voice.mp3" });
+  });
+});
+
+describe("generated result persistence", () => {
+  it("moves inline image and audio bytes into the blob store", async () => {
+    const blobStore = createMemoryBlobStore();
+    const image = await persistGeneratedResult({ kind: "image", images: [{ src: "data:image/png;base64,QQ==", revisedPrompt: null }] }, blobStore);
+    const audio = await persistGeneratedResult({ kind: "audio", blob: new Blob(["audio"], { type: "audio/mpeg" }) }, blobStore);
+
+    expect(image.images[0]).toMatchObject({ blobId: expect.any(String), mimeType: "image/png" });
+    expect(image.images[0]).not.toHaveProperty("src");
+    expect(audio).toMatchObject({ kind: "audio", blobId: expect.any(String), mimeType: "audio/mpeg" });
+    expect(audio).not.toHaveProperty("blob");
+
+    const hydratedImage = await hydrateGeneratedResult(image, blobStore, (blob) => `blob:${blob.type}`);
+    const hydratedAudio = await hydrateGeneratedResult(audio, blobStore, (blob) => `blob:${blob.type}`);
+    expect(hydratedImage.images[0].src).toBe("blob:image/png");
+    expect(hydratedAudio.src).toBe("blob:audio/mpeg");
+  });
+
+  it("stores fetchable remote images and videos, with URL fallback on CORS failure", async () => {
+    const blobStore = createMemoryBlobStore();
+    const calls = [];
+    const fetchBlob = async (url, options) => {
+      calls.push(options);
+      if (url.includes("blocked")) throw new Error("CORS");
+      return new Blob([url], { type: url.endsWith(".mp4") ? "video/mp4" : "image/png" });
+    };
+    const image = await persistGeneratedResult({ kind: "image", images: [{ src: "https://cdn.example/image.png" }] }, blobStore, fetchBlob);
+    const video = await persistGeneratedResult({ kind: "video", videos: ["https://cdn.example/video.mp4", "https://blocked.example/video.mp4"] }, blobStore, fetchBlob);
+    expect(image.images[0]).toMatchObject({ blobId: expect.any(String), mimeType: "image/png" });
+    expect(video.videos[0]).toMatchObject({ blobId: expect.any(String), mimeType: "video/mp4" });
+    expect(video.videos[1]).toBe("https://blocked.example/video.mp4");
+    expect(calls).toEqual([
+      { credentials: "omit", referrerPolicy: "no-referrer" },
+      { credentials: "omit", referrerPolicy: "no-referrer" },
+      { credentials: "omit", referrerPolicy: "no-referrer" },
+    ]);
   });
 });

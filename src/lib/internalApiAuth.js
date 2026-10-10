@@ -3,11 +3,11 @@ import { getConsistentMachineId } from "@/shared/utils/machineId";
 
 const CLI_TOKEN_SALT = "9r-cli-auth";
 
-export async function getInternalHeaders({ contentType = "application/json" } = {}) {
+export async function getInternalHeaders({ contentType = "application/json", allowRestrictedFallback = true } = {}) {
   let apiKey = null;
   try {
-    const keys = await getApiKeys();
-    apiKey = keys.find((key) => key.isActive !== false && !key.access?.restricted)?.key || null;
+    const activeKeys = (await getApiKeys()).filter((key) => key.isActive !== false && key.key);
+    apiKey = (activeKeys.find((key) => !key.access?.restricted) || (allowRestrictedFallback ? activeKeys[0] : null))?.key || null;
   } catch {}
 
   const headers = {};

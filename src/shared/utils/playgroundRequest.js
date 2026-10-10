@@ -25,7 +25,7 @@ const DEFAULTS = {
 
 // Keys the playground owns. Advanced JSON and settings can never set them.
 const PROTECTED_KEYS = new Set([
-  "model", "messages", "input", "prompt", "file", "files", "stream", "stream_options",
+  "model", "messages", "input", "prompt", "file", "files", "stream", "stream_options", "voice",
   "url", "endpoint", "base_url", "baseurl", "api_base", "headers", "provider",
   "connection_id", "connectionid", "x-connection-id", "x-9router-connection-id",
   "request_id", "id", "job_id", "jobid",
@@ -73,7 +73,7 @@ export function mergeAdvanced(base, advanced = {}) {
 function cleanSettings(mode, settings) {
   const out = {};
   for (const [key, value] of Object.entries({ ...DEFAULTS[mode], ...settings })) {
-    if (value == null || isProtected(key)) continue;
+    if (value == null || (isProtected(key) && !(mode === "stt" && key === "prompt"))) continue;
     out[key] = value;
   }
   return out;
@@ -87,7 +87,7 @@ function nonEmptyText(value) {
  * Build a request spec for one playground run.
  * @returns {{method, path, headers, bodyType: "json"|"form", body?, formFields?, responseType: "sse"|"json"|"blob", ignored: string[]}}
  */
-export function buildPlaygroundRequest({ mode, model, settings = {}, input = {}, advanced } = {}) {
+export function buildPlaygroundRequest({ mode, model, settings = {}, input = {}, advanced, limits = {} } = {}) {
   assertMode(mode);
   if (typeof model !== "string" || model.trim() === "") throw new Error("A model is required");
 
@@ -107,6 +107,9 @@ export function buildPlaygroundRequest({ mode, model, settings = {}, input = {},
       const messages = Array.isArray(input.messages) ? input.messages : [];
       if (messages.length === 0) throw new Error("Chat needs at least one message");
       const { system, ...rest } = opts;
+      if (Number.isFinite(limits.maxOutput) && Number.isFinite(rest.max_tokens)) {
+        rest.max_tokens = Math.min(rest.max_tokens, limits.maxOutput);
+      }
       // stream is protected from Advanced JSON, but the UI toggle owns it.
       const isStream = settings.stream !== false;
       base = {
@@ -152,7 +155,7 @@ export function buildPlaygroundRequest({ mode, model, settings = {}, input = {},
   const { body, ignored } = mergeAdvanced(base, advancedObj);
   return {
     method: "POST",
-    path: API_BASE + PATHS[mode],
+    path: API_BASE + PATHS[mode] + (mode === "tts" && body.response_format ? `?response_format=${encodeURIComponent(body.response_format)}` : ""),
     headers: { "Content-Type": "application/json" },
     bodyType: "json",
     body,
@@ -161,13 +164,13 @@ export function buildPlaygroundRequest({ mode, model, settings = {}, input = {},
   };
 }
 
-/** GET spec to poll an async video job. Pass the connection id returned on create (x-9router-connection-id). */
-export function buildVideoPollRequest(jobId, connectionId) {
+/** GET spec to poll an async video job using the opaque token returned by the dashboard gateway. */
+export function buildVideoPollRequest(jobId, pollToken) {
   if (typeof jobId !== "string" || jobId === "") throw new Error("A video job id is required");
   return {
     method: "GET",
     path: `${API_BASE}/videos/${encodeURIComponent(jobId)}`,
-    headers: connectionId ? { "x-connection-id": String(connectionId) } : {},
+    headers: pollToken ? { "x-playground-video-token": String(pollToken) } : {},
     bodyType: "none",
     responseType: "json",
   };
@@ -253,6 +256,20 @@ export function reduceStreamEvent(state, data) {
   return next;
 }
 
+export function reduceSseBuffer(state, buffer, final = false) {
+  const split = splitSseEvents(buffer);
+  let next = split.events.reduce((current, event) => reduceStreamEvent(current, event), state);
+  let rest = split.rest;
+  if (final && rest.trim()) {
+    const data = rest.split(/\r?\n/)
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).replace(/^ /, ""));
+    if (data.length) next = reduceStreamEvent(next, data.join("\n"));
+    rest = "";
+  }
+  return { state: next, rest };
+}
+
 /** Assistant message to append to history after a stream ends. */
 export function finalizeAssistantMessage(state) {
   const msg = { role: "assistant", content: state.content || null };
@@ -296,7 +313,7 @@ export function normalizeResponse(mode, data) {
     case "image": {
       if (!isPlainObject(data)) break;
       const images = (data.data || [])
-        .map((d) => ({ src: d.url || (d.b64_json ? `data:image/png;base64,${d.b64_json}` : null), revisedPrompt: d.revised_prompt ?? null }))
+        .map((d) => ({ src: d.url || (d.b64_json ? `data:image/${d.output_format || data.output_format || "png"};base64,${d.b64_json}` : null), revisedPrompt: d.revised_prompt ?? null }))
         .filter((img) => img.src);
       return { kind: "image", images };
     }
