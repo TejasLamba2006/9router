@@ -2,6 +2,7 @@ export default {
   id: "openai",
   priority: 30,
   alias: "openai",
+  modelDiscovery: "refresh",
   display: {
     name: "OpenAI",
     icon: "auto_awesome",

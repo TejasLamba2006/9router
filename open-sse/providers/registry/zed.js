@@ -4,6 +4,7 @@ export default {
   priority: 999,
   alias: "zd",
   uiAlias: "zd",
+  modelDiscovery: "live",
   display: {
     name: "Zed",
     icon: "code",

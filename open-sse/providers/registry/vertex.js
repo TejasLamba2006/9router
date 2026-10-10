@@ -6,6 +6,7 @@ export default {
     "vx",
   ],
   uiAlias: "vx",
+  modelDiscovery: "refresh",
   display: {
     name: "Vertex AI",
     icon: "cloud",

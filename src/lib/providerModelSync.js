@@ -24,7 +24,36 @@ export function genericModelsConfig(providerId) {
 const REPORTED_FIELDS = [
   "owned_by", "created", "description", "capabilities", "architecture",
   "context_length", "max_completion_tokens", "pricing", "supportedGenerationMethods",
+  "supported_endpoint_types", "tags",
 ];
+
+const NON_CHAT_PATTERN = /(?:^|[-_/])(guard|safeguard|safety|moderation|rerank)(?:$|[-_/])/i;
+
+export function classifyProviderModelKind(provider, model) {
+  const id = String(model?.id || model?.name || model?.model || "").replace(/^models\//, "").toLowerCase();
+  if (!id || NON_CHAT_PATTERN.test(id)) return null;
+
+  const endpointTypes = Array.isArray(model?.supported_endpoint_types)
+    ? model.supported_endpoint_types.map((value) => String(value).toLowerCase())
+    : [];
+  if (endpointTypes.includes("embeddings")) return "embedding";
+  if (endpointTypes.includes("image-generation")) return "image";
+  if (endpointTypes.includes("audio-chat")) return "tts";
+
+  const outputModalities = model?.architecture?.output_modalities;
+  if (Array.isArray(outputModalities) && outputModalities.includes("image")) return "image";
+  if (Array.isArray(outputModalities) && outputModalities.includes("audio")) return "tts";
+
+  if (/embed/.test(id)) return "embedding";
+  if (/whisper|transcri/.test(id)) return "stt";
+  if (/tts|speech|orpheus/.test(id)) return "tts";
+  if (/sora|veo/.test(id)) return "video";
+  if (/image|imagen|dall-?e|nano-banana/.test(id)) return "image";
+  if (/realtime|live|audio|omni|lyria|robotics|computer-use|antigravity|deep-research|aqa/.test(id)) return null;
+  if (provider === "gemini" && Array.isArray(model?.supportedGenerationMethods)
+    && !model.supportedGenerationMethods.includes("generateContent")) return null;
+  return "llm";
+}
 
 // Providers answer with {id}, {name: "models/x"} (Gemini) or {model}. Keep
 // useful, bounded metadata for Phase 4 without treating it as verified here.
@@ -35,7 +64,6 @@ export function normalizeModelList(list, prefixes = []) {
   let duplicates = 0;
   for (const m of Array.isArray(list) ? list : []) {
     if (!m || typeof m !== "object" || Array.isArray(m)) { invalid += 1; continue; }
-    if (Array.isArray(m.supportedGenerationMethods) && !m.supportedGenerationMethods.includes("generateContent")) continue;
     const raw = m.id || m.name || m.model;
     let id = typeof raw === "string" ? raw.replace(/^models\//, "").trim() : "";
     for (const prefix of Array.isArray(prefixes) ? prefixes : [prefixes]) {
@@ -58,7 +86,8 @@ export function normalizeModelList(list, prefixes = []) {
 
 // `fetchModels(conn)` returns one raw list; `upsertModels` persists the whole
 // normalized catalog in one transaction. Built-ins stay registry-owned.
-export async function syncConnectionModels(conn, { fetchModels, alias, builtinIds, upsertModels, signal }) {
+export async function syncConnectionModels(conn, { fetchModels, alias, builtinIds, builtinKinds, trackedKinds, upsertModels, signal }) {
+  const builtins = builtinKinds || new Set([...builtinIds].map((id) => `llm:${id}`));
   const empty = { provider: conn.provider, connectionId: conn.id, fetched: 0, added: 0, updated: 0, unchanged: 0, invalid: 0, stale: 0 };
   if (signal?.aborted) return { ...empty, error: "Import cancelled" };
   let raw;
@@ -70,24 +99,45 @@ export async function syncConnectionModels(conn, { fetchModels, alias, builtinId
   if (signal?.aborted) return { ...empty, error: "Import cancelled" };
   const catalog = Array.isArray(raw) ? { models: raw, authoritative: true } : raw || {};
   const rawModels = Array.isArray(catalog.models) ? catalog.models : [];
-  const models = normalizeModelList(rawModels, [conn.provider, alias]);
-  if (models.length === 0) return { ...empty, fetched: rawModels.length };
-  const imported = models.filter(({ id }) => !builtinIds.has(id));
-  const saved = await upsertModels({
-    providerAlias: alias,
-    connectionId: conn.id,
-    models: imported,
-    // Fallback/static catalogs are useful additions, but only a confirmed live
-    // catalog may mark previously imported entries stale.
-    authoritative: catalog.authoritative === true,
-  });
-  return {
-    provider: conn.provider,
-    connectionId: conn.id,
-    ...saved,
-    fetched: rawModels.length,
-    invalid: (saved.invalid || 0) + models.invalid + models.duplicates,
-  };
+  const byKind = new Map();
+  let invalid = 0;
+  for (const rawModel of rawModels) {
+    const declaredKind = ["llm", "embedding", "image", "tts", "stt", "video"].includes(rawModel?.kind)
+      ? rawModel.kind
+      : null;
+    const kind = declaredKind || classifyProviderModelKind(conn.provider, rawModel);
+    if (!kind) { invalid += 1; continue; }
+    const models = byKind.get(kind) || [];
+    models.push(rawModel);
+    byKind.set(kind, models);
+  }
+  if (byKind.size === 0 && catalog.authoritative !== true) {
+    return { ...empty, fetched: rawModels.length, invalid };
+  }
+
+  const kinds = catalog.authoritative === true
+    ? new Set([...(trackedKinds || []), ...byKind.keys()])
+    : new Set(byKind.keys());
+  const total = { fetched: rawModels.length, added: 0, updated: 0, unchanged: 0, invalid, stale: 0 };
+  for (const type of kinds) {
+    const models = normalizeModelList(byKind.get(type) || [], [conn.provider, alias]);
+    const imported = models.filter(({ id }) => !builtins.has(`${type}:${id}`));
+    const saved = await upsertModels({
+      providerAlias: alias,
+      connectionId: conn.id,
+      models: imported,
+      type,
+      // Fallback/static catalogs are useful additions, but only a confirmed live
+      // catalog may mark previously imported entries stale.
+      authoritative: catalog.authoritative === true,
+    });
+    total.added += saved.added || 0;
+    total.updated += saved.updated || 0;
+    total.unchanged += saved.unchanged || 0;
+    total.invalid += (saved.invalid || 0) + models.invalid + models.duplicates;
+    total.stale += saved.stale || 0;
+  }
+  return { provider: conn.provider, connectionId: conn.id, ...total };
 }
 
 export { TYPES_WITH_OWN_FETCH };

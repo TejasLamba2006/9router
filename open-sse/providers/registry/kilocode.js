@@ -3,6 +3,7 @@ export default {
   priority: 70,
   alias: "kc",
   uiAlias: "kc",
+  modelDiscovery: "refresh",
   display: {
     name: "Kilo Code",
     icon: "code",

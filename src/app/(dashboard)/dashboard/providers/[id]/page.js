@@ -16,6 +16,7 @@ import { fetchSuggestedModels } from "@/shared/utils/providerModelsFetcher";
 import { getProviderCustomModelRows } from "@/shared/utils/providerCustomModels";
 import { filterModelRows } from "@/shared/utils/modelVisibility";
 import { filterAndSortModelRows } from "@/shared/utils/modelToolbar";
+import { showsModelCatalog, showsModelRefresh } from "@/shared/utils/providerModelDiscovery";
 import ModelVisibilityToolbar from "./ModelVisibilityToolbar";
 import ModelBatchToolbar from "./ModelBatchToolbar";
 import useModelBatchTest from "./useModelBatchTest";
@@ -208,6 +209,11 @@ export default function ProviderDetailPage() {
   const isOpenAICompatible = isOpenAICompatibleProvider(providerId);
   const isAnthropicCompatible = isAnthropicCompatibleProvider(providerId);
   const isCompatible = isOpenAICompatible || isAnthropicCompatible;
+  const showModelCatalog = showsModelCatalog(providerInfo, isCompatible);
+  const showModelRefresh = showsModelRefresh(
+    providerInfo,
+    connections.some((connection) => connection.isActive !== false),
+  );
   const hasDualAuthModes = !isCompatible && isOAuth && supportsApiKeyAuth;
   const oauthConnectionLabel =
     providerId === "xai" ? "Grok Build OAuth"
@@ -533,7 +539,7 @@ export default function ProviderDetailPage() {
   // the provider id or connection list changes — no polling, no loop.
   // Cursor path is statement-identical to before; zed adds error surfacing.
   useEffect(() => {
-    const isLiveCatalog = providerId === "cursor" || providerId === "zed";
+    const isLiveCatalog = providerInfo?.modelDiscovery === "live";
     if (!isLiveCatalog) {
       setLiveModels([]);
       return;
@@ -570,7 +576,7 @@ export default function ProviderDetailPage() {
       });
 
     return () => { cancelled = true; };
-  }, [providerId, connections]);
+  }, [providerId, providerInfo?.modelDiscovery, connections]);
 
   // Fetch suggested models from provider's public API (if configured)
   useEffect(() => {
@@ -1288,7 +1294,7 @@ export default function ProviderDetailPage() {
         </button>
 
         {/* Refresh this provider's models from its live /models endpoint */}
-        {connections.some((conn) => conn.isActive !== false) && (
+        {showModelRefresh && (
           <button
             onClick={handleRefreshModels}
             disabled={refreshingModels}
@@ -1780,7 +1786,7 @@ export default function ProviderDetailPage() {
       <CustomConfigCard providerId={providerId} />
 
       {/* Models */}
-      <Card>
+      {showModelCatalog && <Card>
         <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
             <h2 className="text-lg font-semibold">
@@ -1825,7 +1831,7 @@ export default function ProviderDetailPage() {
           <p className="text-xs text-red-500 mb-3 break-words">{liveModelsError}</p>
         )}
         {renderModelsSection()}
-      </Card>
+      </Card>}
 
       {bulkActionModal}
 

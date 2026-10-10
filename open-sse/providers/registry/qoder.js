@@ -15,6 +15,7 @@ export default {
   category: "oauth",
   authModes: ["oauth", "apikey"],
   hasOAuth: true,
+  modelDiscovery: "refresh",
   authHint: "Personal Access Token (pt-...) từ https://qoder.com/account/integrations",
   transport: {
     baseUrl: "https://api3.qoder.sh/algo/api/v2/service/pro/sse/agent_chat_generation",

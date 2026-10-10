@@ -17,6 +17,7 @@ export default {
     deprecationNotice: "RISK_NOTICE",
   },
   category: "oauth",
+  modelDiscovery: "refresh",
   serviceKinds: ["llm", "image", "webSearch"],
   transport: {
     baseUrls: [ANTIGRAVITY_IDE_BASE_URL],

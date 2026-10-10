@@ -92,6 +92,7 @@ export default {
   ],
 
   // ── optional flags ───────────────────────────────────────────────────────
+  // modelDiscovery: "refresh",  // "refresh" imports on demand; "live" replaces static rows.
   // features: { usage: true },
   // thinkingConfig: { options: ["auto", "none", "low", "high"], defaultMode: "auto" },
   // passthroughModels: true,

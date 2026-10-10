@@ -59,11 +59,12 @@ describe("provider custom model rows", () => {
     ]);
   });
 
-  it("filters built-in models and typed custom models", () => {
+  it("filters built-in, stale, and typed custom models", () => {
     const rows = getProviderCustomModelRows({
       customModels: [
         { providerAlias: "ollama", id: "llama3", type: "llm", name: "Llama 3" },
         { providerAlias: "ollama", id: "custom-image", type: "image", name: "Custom Image" },
+        { providerAlias: "ollama", id: "stale-llm", type: "llm", name: "Stale LLM", stale: true },
         { providerAlias: "ollama", id: "custom-llm", type: "llm", name: "Custom LLM" },
       ],
       providerAlias: "ollama",

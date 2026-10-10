@@ -3,6 +3,7 @@ export default {
   alias: "tokenrouter",
   aliases: ["tr"],
   uiAlias: "tokenrouter",
+  modelDiscovery: "refresh",
   display: {
     name: "TokenRouter",
     icon: "hub",

@@ -31,6 +31,7 @@ export const PROVIDERS = {};
 export const PROVIDER_MODELS = {};
 export const PROVIDER_OAUTH = {};
 export const PROVIDER_MEDIA = {};
+export const PROVIDER_MODEL_DISCOVERY = {};
 for (const entry of REGISTRY) {
   if (entry.transport) {
     PROVIDERS[entry.id] = buildTransport(entry.transport, entry.oauth);
@@ -38,6 +39,7 @@ for (const entry of REGISTRY) {
   }
   if (entry.models !== undefined) PROVIDER_MODELS[entry.alias || entry.id] = entry.models.map(normalizeModel);
   if (entry.oauth) PROVIDER_OAUTH[entry.id] = entry.oauth;
+  if (entry.modelDiscovery) PROVIDER_MODEL_DISCOVERY[entry.id] = entry.modelDiscovery;
   // Build PROVIDER_MEDIA from top-level fields (post-migration) + legacy entry.media
   const mediaFields = {};
   for (const k of MEDIA_KEYS) {

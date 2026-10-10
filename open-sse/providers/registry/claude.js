@@ -17,6 +17,7 @@ export default {
     deprecationNotice: "RISK_NOTICE",
   },
   category: "oauth",
+  modelDiscovery: "refresh",
   transport: {
     baseUrl: "https://api.anthropic.com/v1/messages",
     format: "claude",

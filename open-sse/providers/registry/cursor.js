@@ -3,6 +3,7 @@ export default {
   priority: 50,
   alias: "cu",
   uiAlias: "cu",
+  modelDiscovery: "live",
   display: {
     name: "Cursor IDE",
     icon: "edit_note",

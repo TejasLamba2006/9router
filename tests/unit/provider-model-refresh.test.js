@@ -94,6 +94,36 @@ describe("provider model refresh", () => {
     expect(mocks.upsertCustomModels).toHaveBeenCalledTimes(1);
   });
 
+  it("skips built-in providers without refresh discovery during a full refresh", async () => {
+    mocks.getProviderConnections.mockResolvedValue([
+      { id: "static", provider: "cloudflare-ai", isActive: true },
+      { id: "live", provider: "zed", isActive: true },
+      { id: "web", provider: "exa", isActive: true },
+      { id: "refresh", provider: "gemini", isActive: true },
+      { id: "custom", provider: "openai-compatible-chat-test", isActive: true, providerSpecificData: { prefix: "test" } },
+    ]);
+
+    const result = await refreshProviderModels();
+
+    expect(mocks.routeGet).toHaveBeenCalledTimes(2);
+    expect(result.map((entry) => entry.provider)).toEqual(["gemini", "openai-compatible-chat-test"]);
+  });
+
+  it("reports an unsupported explicitly requested built-in connection without calling its route", async () => {
+    mocks.getProviderConnections.mockResolvedValue([
+      { id: "static", provider: "cloudflare-ai", isActive: true },
+    ]);
+
+    const result = await refreshProviderModels({ connectionId: "static" });
+
+    expect(mocks.routeGet).not.toHaveBeenCalled();
+    expect(result).toEqual([expect.objectContaining({
+      provider: "cloudflare-ai",
+      connectionId: "static",
+      error: "Provider cloudflare-ai does not support model refresh",
+    })]);
+  });
+
   it("coalesces a full refresh with a manual refresh of the same connection", async () => {
     let release;
     mocks.routeGet.mockImplementation(() => new Promise((resolve) => { release = () => resolve(Response.json({ models: [{ id: "m1" }], authoritative: true })); }));

@@ -37,12 +37,12 @@ describe("normalizeModelList", () => {
     expect(out.duplicates).toBe(1);
   });
 
-  it("skips Gemini models that cannot generate content", () => {
+  it("normalizes models after provider kind classification", () => {
     const out = normalizeModelList([
       { name: "models/embed-1", supportedGenerationMethods: ["embedContent"] },
       { name: "models/chat-1", supportedGenerationMethods: ["generateContent"] },
     ]);
-    expect(out.map((m) => m.id)).toEqual(["chat-1"]);
+    expect(out.map((m) => m.id)).toEqual(["embed-1", "chat-1"]);
   });
 
   it("strips the current provider alias from qualified ids", () => {

@@ -15,7 +15,7 @@ export function getProviderCustomModelRows({
   const rows = [];
 
   for (const model of customModels) {
-    if (!model?.id || model.providerAlias !== providerAlias) continue;
+    if (!model?.id || model.stale === true || model.providerAlias !== providerAlias) continue;
     const rowType = modelType(model);
     if (type && rowType !== type) continue;
     if (builtInIds.has(model.id)) continue;

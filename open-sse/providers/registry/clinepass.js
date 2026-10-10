@@ -19,6 +19,7 @@ export default {
   // tokens that the ClinePass API consumer endpoint accepts (HTTP 401) — see #2333.
   authModes: ["apikey", "oauth"],
   hasOAuth: true,
+  modelDiscovery: "refresh",
   transport: {
     baseUrl: "https://api.cline.bot/api/v1/chat/completions",
     headers: {

@@ -5,6 +5,7 @@
 import { getProviderConnections, upsertCustomModels } from "@/lib/localDb";
 import { getProviderAlias, isOpenAICompatibleProvider, isAnthropicCompatibleProvider } from "@/shared/constants/providers";
 import { getModelsByProviderId } from "open-sse/config/providerModels.js";
+import { PROVIDER_MODEL_DISCOVERY } from "open-sse/providers/index.js";
 import { syncConnectionModels } from "@/lib/providerModelSync";
 
 let running = null;
@@ -18,16 +19,40 @@ async function fetchViaRoute(conn, signal) {
   return body;
 }
 
+function supportsConnectionRefresh(conn) {
+  return isOpenAICompatibleProvider(conn.provider)
+    || isAnthropicCompatibleProvider(conn.provider)
+    || PROVIDER_MODEL_DISCOVERY[conn.provider] === "refresh";
+}
+
+function unsupportedResult(conn) {
+  return {
+    provider: conn.provider,
+    connectionId: conn.id,
+    fetched: 0,
+    added: 0,
+    updated: 0,
+    unchanged: 0,
+    invalid: 0,
+    stale: 0,
+    error: `Provider ${conn.provider} does not support model refresh`,
+  };
+}
+
 function refreshConnection(conn, signal) {
   const current = runningByConnection.get(conn.id);
   if (current) return current;
+  if (!supportsConnectionRefresh(conn)) return Promise.resolve(unsupportedResult(conn));
 
   const compat = isOpenAICompatibleProvider(conn.provider) || isAnthropicCompatibleProvider(conn.provider);
   const alias = compat ? conn.provider : getProviderAlias(conn.provider);
+  const builtinModels = getModelsByProviderId(conn.provider);
   const job = syncConnectionModels(conn, {
     fetchModels: (connection) => fetchViaRoute(connection, signal),
     alias,
-    builtinIds: new Set(getModelsByProviderId(conn.provider).map((m) => m.id)),
+    builtinIds: new Set(builtinModels.map((model) => model.id)),
+    builtinKinds: new Set(builtinModels.map((model) => `${model.kind || model.type || "llm"}:${model.id}`)),
+    trackedKinds: new Set(builtinModels.map((model) => model.kind || model.type || "llm")),
     upsertModels: upsertCustomModels,
     signal,
   });
@@ -41,9 +66,10 @@ export async function refreshProviderModels({ connectionId, signal } = {}) {
   if (running && !connectionId) return running;
   const job = (async () => {
     const all = await getProviderConnections({ isActive: true });
-    const conns = connectionId
+    const selected = connectionId
       ? all.filter((c) => c.id === connectionId)
       : [...new Map(all.map((c) => [c.provider, c])).values()];
+    const conns = connectionId ? selected : selected.filter(supportsConnectionRefresh);
     const results = [];
     for (const conn of conns) results.push(await refreshConnection(conn, signal));
     return results;

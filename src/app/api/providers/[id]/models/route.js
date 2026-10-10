@@ -15,6 +15,7 @@ import { resolveCursorModels } from "open-sse/services/cursorModels.js";
 import { resolveZedModels } from "open-sse/shared/zedAuth.js";
 import { resolveClineModels, resolveClinepassModels } from "open-sse/services/clinepassModels.js";
 import { parseVertexSaJson, refreshVertexToken } from "open-sse/services/tokenRefresh.js";
+import { ANTIGRAVITY_IDE_BASE_URL, ANTIGRAVITY_IDE_USER_AGENT, ANTIGRAVITY_IDE_VERSION } from "open-sse/providers/shared.js";
 import codexProvider from "open-sse/providers/registry/codex.js";
 import { genericModelsConfig } from "@/lib/providerModelSync";
 
@@ -26,6 +27,16 @@ const CODEX_MODELS_URL = `https://chatgpt.com/backend-api/codex/models?client_ve
 const parseOpenAIStyleModels = (data) => {
   if (Array.isArray(data)) return data;
   return data?.data || data?.models || data?.results || [];
+};
+
+const parseAntigravityModels = (data) => {
+  const ids = (data?.agentModelSorts || []).flatMap((section) =>
+    (section?.groups || []).flatMap((group) => group?.modelIds || []));
+  return [...new Set(ids)].flatMap((id) => {
+    const model = data?.models?.[id];
+    if (!model || model.isInternal) return [];
+    return [{ id, name: model.displayName || id }];
+  });
 };
 
 const parseGeminiCliModels = (data) => {
@@ -78,7 +89,7 @@ const createOpenAIModelsConfig = (url) => ({
   headers: { "Content-Type": "application/json" },
   authHeader: "Authorization",
   authPrefix: "Bearer ",
-  parseResponse: parseOpenAIStyleModels
+  parseResponse: parseOpenAIStyleModels,
 });
 
 const getStaticProviderModels = (providerId) =>
@@ -259,7 +270,7 @@ function buildQoderModelsResolver(providerId) {
 }
 
 // Provider models endpoints configuration
-const PROVIDER_MODELS_CONFIG = {
+export const PROVIDER_MODELS_CONFIG = {
   "muse": {
     url: "https://api.meta.ai/v1/models",
     method: "GET",
@@ -269,21 +280,28 @@ const PROVIDER_MODELS_CONFIG = {
     parseResponse: (data) => data.data || [],
   },
   claude: {
-    url: "https://api.anthropic.com/v1/models",
-    method: "GET",
-    headers: {
-      "Anthropic-Version": "2023-06-01",
-      "Content-Type": "application/json"
+    customResolver: async (connection, options = {}) => {
+      const token = connection.authType === "oauth" ? connection.accessToken : connection.apiKey;
+      if (!token) return { error: "No valid token found", status: 401 };
+      const headers = {
+        "Anthropic-Version": "2023-06-01",
+        "Content-Type": "application/json",
+        ...(connection.authType === "oauth"
+          ? { Authorization: `Bearer ${token}` }
+          : { "x-api-key": token }),
+      };
+      const response = await options.fetchUpstream("https://api.anthropic.com/v1/models", { method: "GET", headers });
+      if (!response.ok) return { error: `Failed to fetch models: ${response.status}`, status: response.status };
+      const data = await response.json();
+      return { models: data.data || [] };
     },
-    authHeader: "x-api-key",
-    parseResponse: (data) => data.data || []
   },
   gemini: {
     url: "https://generativelanguage.googleapis.com/v1beta/models",
     method: "GET",
     headers: { "Content-Type": "application/json" },
     authQuery: "key", // Use query param for API key
-    parseResponse: (data) => data.models || []
+    parseResponse: (data) => data.models || [],
   },
   vertex: {
     customResolver: resolveVertexModels,
@@ -305,13 +323,22 @@ const PROVIDER_MODELS_CONFIG = {
     })
   },
   antigravity: {
-    url: "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:models",
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    authHeader: "Authorization",
-    authPrefix: "Bearer ",
-    body: {},
-    parseResponse: (data) => data.models || []
+    customResolver: async (connection, options = {}) => {
+      if (!connection.accessToken) return { error: "No valid token found", status: 401 };
+      const response = await options.fetchUpstream(`${ANTIGRAVITY_IDE_BASE_URL}/v1internal:fetchAvailableModels`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${connection.accessToken}`,
+          "Content-Type": "application/json",
+          "User-Agent": ANTIGRAVITY_IDE_USER_AGENT,
+          "X-Client-Name": "antigravity",
+          "X-Client-Version": ANTIGRAVITY_IDE_VERSION,
+        },
+        body: JSON.stringify(connection.projectId ? { project: connection.projectId } : {}),
+      });
+      if (!response.ok) return { error: `Failed to fetch models: ${response.status}`, status: response.status };
+      return { models: parseAntigravityModels(await response.json()) };
+    },
   },
   github: {
     url: "https://api.githubcopilot.com/models",
@@ -402,6 +429,7 @@ const PROVIDER_MODELS_CONFIG = {
   assemblyai: createOpenAIModelsConfig("https://api.assemblyai.com/v1/models"),
   "vercel-ai-gateway": createOpenAIModelsConfig("https://ai-gateway.vercel.sh/v1/models"),
   // OpenAI-compatible aggregators.
+  tokenrouter: createOpenAIModelsConfig("https://api.tokenrouter.com/v1/models"),
   tokenharbor: createOpenAIModelsConfig("https://tokenharbor.ai/v1/models"),
   dahl: createOpenAIModelsConfig("https://inference.dahl.global/v1/models"),
   atria: createOpenAIModelsConfig("https://api.atria-asi.ai/v1/models"),
@@ -638,6 +666,10 @@ const PROVIDER_MODELS_CONFIG = {
     }
   }
 };
+
+export function supportsProviderModelListing(providerId) {
+  return Boolean(PROVIDER_MODELS_CONFIG[providerId] || genericModelsConfig(providerId));
+}
 
 /**
  * GET /api/providers/[id]/models - Get models list from provider

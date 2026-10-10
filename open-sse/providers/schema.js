@@ -22,6 +22,7 @@ import { DEFAULT_RETRY_CONFIG, FETCH_CONNECT_TIMEOUT_MS } from "../config/runtim
  * @property {Array}   [models]       Model list; omit = no model key, [] = explicit empty.
  * @property {Object}  [features]     Feature flags, e.g. {usage:true}.
  * @property {Object}  [thinkingConfig] Reasoning UI: {options:[...],defaultMode}.
+ * @property {"refresh"|"live"} [modelDiscovery] Model catalog source. Omit for static or non-LLM providers.
  * @property {boolean} [passthroughModels] Forward client model id untouched.
  *
  * TransportConfig: { baseUrl, format, headers, auth, forceStream, urlSuffix, quirks, retry, timeoutMs,

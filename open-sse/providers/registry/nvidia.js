@@ -3,6 +3,7 @@ export default {
   priority: 20,
   hasFree: true,
   alias: "nvidia",
+  modelDiscovery: "refresh",
   display: {
     name: "NVIDIA NIM",
     icon: "developer_board",

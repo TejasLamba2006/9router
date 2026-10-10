@@ -3,6 +3,7 @@ export default {
   priority: 10,
   hasFree: true,
   alias: "openrouter",
+  modelDiscovery: "refresh",
   display: {
     name: "OpenRouter",
     icon: "router",

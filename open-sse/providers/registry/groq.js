@@ -3,6 +3,7 @@ export default {
   priority: 60,
   hasFree: true,
   alias: "groq",
+  modelDiscovery: "refresh",
   display: {
     name: "Groq",
     icon: "speed",
