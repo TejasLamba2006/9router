@@ -86,6 +86,9 @@ describe("toApiMessages", () => {
     { id: "1", role: "user", content: "look", attachments: [
       { id: "a1", kind: "image", name: "p.png" },
       { id: "a2", kind: "text", name: "notes.md", text: "# hi" },
+      { id: "a3", kind: "audio", name: "voice.mp3", mimeType: "audio/mpeg" },
+      { id: "a4", kind: "pdf", name: "report.pdf", mimeType: "application/pdf", native: true },
+      { id: "a5", kind: "docx", name: "report.docx", text: "Extracted document" },
     ] },
     { id: "2", role: "assistant", content: null, reasoning_content: "thinking", status: "done",
       tool_calls: [{ id: "c1", type: "function", function: { name: "f", arguments: "{}" } }], usage: { total_tokens: 3 } },
@@ -95,11 +98,18 @@ describe("toApiMessages", () => {
   ];
 
   it("strips UI fields, builds content parts and drops failed or empty turns", () => {
-    expect(toApiMessages(messages, { a1: "data:image/png;base64,AA" })).toEqual([
+    expect(toApiMessages(messages, {
+      a1: "data:image/png;base64,AA",
+      a3: "data:audio/mpeg;base64,QVVESU8=",
+      a4: "data:application/pdf;base64,UERG",
+    })).toEqual([
       { role: "user", content: [
         { type: "text", text: "look" },
         { type: "image_url", image_url: { url: "data:image/png;base64,AA" } },
         { type: "text", text: "--- notes.md ---\n# hi" },
+        { type: "input_audio", input_audio: { data: "QVVESU8=", format: "mp3" } },
+        { type: "file", file: { filename: "report.pdf", file_data: "data:application/pdf;base64,UERG" } },
+        { type: "text", text: "--- report.docx ---\nExtracted document" },
       ] },
       { role: "assistant", content: null, tool_calls: [{ id: "c1", type: "function", function: { name: "f", arguments: "{}" } }] },
       { role: "tool", tool_call_id: "c1", content: "42" },

@@ -62,15 +62,24 @@ export function sessionTitle(text) {
   return t.length > 48 ? `${t.slice(0, 48)}…` : t;
 }
 
-/** UI history to OpenAI messages. dataUrls maps image attachment id to a data: URL. */
+/** UI history to OpenAI messages. dataUrls maps native attachment ids to data URLs. */
 export function toApiMessages(messages, dataUrls = {}) {
   const out = [];
   for (const m of messages || []) {
     if (m.role === "user") {
       const parts = [];
       for (const a of m.attachments || []) {
-        if (a.kind === "image" && dataUrls[a.id]) parts.push({ type: "image_url", image_url: { url: dataUrls[a.id] } });
-        else if (a.kind === "text" && typeof a.text === "string") parts.push({ type: "text", text: `--- ${a.name} ---\n${a.text}` });
+        const dataUrl = dataUrls[a.id];
+        if (a.kind === "image" && dataUrl) {
+          parts.push({ type: "image_url", image_url: { url: dataUrl } });
+        } else if (a.kind === "audio" && dataUrl) {
+          const format = String(a.mimeType || "audio/wav").split("/")[1]?.replace("mpeg", "mp3") || "wav";
+          parts.push({ type: "input_audio", input_audio: { data: dataUrl.slice(dataUrl.indexOf(",") + 1), format } });
+        } else if (a.kind === "pdf" && a.native !== false && dataUrl) {
+          parts.push({ type: "file", file: { filename: a.name, file_data: dataUrl } });
+        } else if (typeof a.text === "string" && a.text) {
+          parts.push({ type: "text", text: `--- ${a.name}${a.truncated ? " (truncated)" : ""} ---\n${a.text}` });
+        }
       }
       const text = typeof m.content === "string" ? m.content : "";
       out.push({ role: "user", content: parts.length ? [...(text ? [{ type: "text", text }] : []), ...parts] : text });
