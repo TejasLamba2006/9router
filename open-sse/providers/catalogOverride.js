@@ -16,7 +16,7 @@ export const CATALOG_RAW_FILE = path.join(DATA_DIR, "model-catalog-raw.json");
 // Schema of the file this module reads. The writer stamps it; a file carrying an
 // older value predates provider-scoped modality keys, and its flat keys are not
 // looked up here, so the sync rebuilds it instead of asking upstream for a 304.
-export const CATALOG_VERSION = 3;
+export const CATALOG_VERSION = 4;
 
 const EMPTY = {
   models: {}, providers: {}, providerMap: {}, reported: {},

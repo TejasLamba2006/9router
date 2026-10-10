@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { build } from "../../src/lib/modelCatalog/sync.js";
 
-describe("model catalog v3 transform", () => {
+describe("model catalog v4 transform", () => {
   it("preserves reported metadata and canonical pricing", () => {
     const result = build({
       openai: {
