@@ -14,6 +14,7 @@ import { proxyAwareFetch } from "open-sse/utils/proxyFetch.js";
 import { resolveCursorModels } from "open-sse/services/cursorModels.js";
 import { resolveZedModels } from "open-sse/shared/zedAuth.js";
 import { resolveClineModels, resolveClinepassModels } from "open-sse/services/clinepassModels.js";
+import { parseVertexSaJson, refreshVertexToken } from "open-sse/services/tokenRefresh.js";
 import codexProvider from "open-sse/providers/registry/codex.js";
 import { genericModelsConfig } from "@/lib/providerModelSync";
 
@@ -86,6 +87,90 @@ const getStaticProviderModels = (providerId) =>
     id: model.id,
     name: model.name || model.id,
   }));
+
+const VERTEX_NON_CHAT_MODEL_PARTS = [
+  "embedding", "image", "tts", "live", "transcribe", "robotics",
+  "omni", "nano-banana", "computer-use", "veo",
+];
+
+const parseVertexPublisherModels = (models, seen = new Set()) =>
+  (Array.isArray(models) ? models : []).flatMap((model) => {
+    const match = typeof model?.name === "string"
+      ? model.name.match(/^publishers\/google\/models\/(gemini-.+)$/)
+      : null;
+    const id = match?.[1];
+    const stage = model?.launchStage;
+    if (
+      !id || seen.has(id) ||
+      (stage && stage !== "GA" && stage !== "PUBLIC_PREVIEW") ||
+      VERTEX_NON_CHAT_MODEL_PARTS.some((part) => id.includes(part))
+    ) return [];
+    seen.add(id);
+    return [{
+      id,
+      name: id,
+      ...(stage ? { launchStage: stage } : {}),
+      ...(model?.versionState ? { versionState: model.versionState } : {}),
+    }];
+  });
+
+async function resolveVertexModels(connection, options = {}) {
+  const serviceAccount = parseVertexSaJson(connection.apiKey);
+  if (!serviceAccount) return { error: "Vertex model listing requires Service Account JSON", status: 400 };
+  const token = await refreshVertexToken(serviceAccount, console);
+  if (!token?.accessToken) return { error: "Failed to mint Vertex access token", status: 401 };
+
+  const configuredLocation = connection.providerSpecificData?.location;
+  const location = typeof configuredLocation === "string" && /^[a-z0-9-]+$/.test(configuredLocation)
+    ? configuredLocation
+    : "global";
+  const catalogLocation = location === "global" ? "us-central1" : location;
+  const baseUrl = `https://${catalogLocation}-aiplatform.googleapis.com/v1beta1/publishers/google/models`;
+  const models = [];
+  const seen = new Set();
+  let pageToken = "";
+
+  do {
+    const url = new URL(baseUrl);
+    url.searchParams.set("pageSize", "100");
+    url.searchParams.set("view", "PUBLISHER_MODEL_VIEW_FULL");
+    if (pageToken) url.searchParams.set("pageToken", pageToken);
+    const response = await options.fetchUpstream(url, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${token.accessToken}`,
+        "x-goog-user-project": serviceAccount.project_id,
+      },
+    });
+    if (!response.ok) {
+      return { error: `Failed to fetch Vertex models: ${response.status}`, status: response.status };
+    }
+    const data = await response.json();
+    models.push(...parseVertexPublisherModels(data.publisherModels, seen));
+    pageToken = typeof data.nextPageToken === "string" ? data.nextPageToken : "";
+  } while (pageToken);
+
+  const available = await Promise.all(models.map(async (model) => {
+    const url = `https://aiplatform.googleapis.com/v1/projects/${encodeURIComponent(serviceAccount.project_id)}/locations/${encodeURIComponent(location)}/publishers/google/models/${encodeURIComponent(model.id)}:countTokens`;
+    const response = await options.fetchUpstream(url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${token.accessToken}`,
+        "Content-Type": "application/json",
+        "x-goog-user-project": serviceAccount.project_id,
+      },
+      body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: "test" }] }] }),
+    });
+    return response.ok ? model : null;
+  }));
+
+  return {
+    models: available.filter(Boolean),
+    warning: "Vertex model discovery is additive; unavailable models were excluded with countTokens.",
+  };
+}
 
 // Generic custom resolver for OAuth providers that need refresh-on-401 + token persist.
 // Receives a `fetchFn(token)` and returns parsed models or throws.
@@ -199,6 +284,9 @@ const PROVIDER_MODELS_CONFIG = {
     headers: { "Content-Type": "application/json" },
     authQuery: "key", // Use query param for API key
     parseResponse: (data) => data.models || []
+  },
+  vertex: {
+    customResolver: resolveVertexModels,
   },
   codex: {
     customResolver: buildOAuthResolver({

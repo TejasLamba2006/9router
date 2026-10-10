@@ -91,7 +91,7 @@ export class VertexExecutor extends BaseExecutor {
           "Add quota_project_id to your ADC JSON or set providerSpecificData.projectId."
         );
       }
-      const location = credentials?.providerSpecificData?.location || "us-central1";
+      const location = credentials?.providerSpecificData?.location || "global";
       let url = `https://aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${model}:${action}`;
       if (stream) url += "?alt=sse";
       return url;
