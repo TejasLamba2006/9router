@@ -1,10 +1,7 @@
-import { getApiKeys } from "@/lib/localDb";
 import { resolveProviderId } from "@/shared/constants/providers.js";
 import { unwrapClineEnvelope } from "open-sse/shared/clineEnvelope.js";
 import { UPDATER_CONFIG } from "@/shared/constants/config";
-import { getConsistentMachineId } from "@/shared/utils/machineId";
-
-const CLI_TOKEN_SALT = "9r-cli-auth";
+import { getInternalHeaders } from "@/lib/internalApiAuth.js";
 
 function createSilentWavFile() {
   const sampleRate = 16000;
@@ -37,22 +34,6 @@ function createSilentWavFile() {
   view.setUint32(40, dataSize, true);
 
   return new Blob([buffer], { type: "audio/wav" });
-}
-
-async function getInternalHeaders() {
-  let apiKey = null;
-  try {
-    const keys = await getApiKeys();
-    // Prefer an unrestricted key so a dashboard model test is not refused just
-    // because the first key happens to be restricted.
-    const activeKeys = keys.filter((k) => k.isActive !== false);
-    apiKey = (activeKeys.find((k) => !k.access?.restricted) || activeKeys[0])?.key || null;
-  } catch {}
-
-  const headers = { "Content-Type": "application/json" };
-  if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
-  headers["x-9r-cli-token"] = await getConsistentMachineId(CLI_TOKEN_SALT);
-  return headers;
 }
 
 export async function pingModelByKind(model, kind, baseUrl = `http://127.0.0.1:${process.env.PORT || UPDATER_CONFIG.appPort}`) {
