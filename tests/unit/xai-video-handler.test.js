@@ -135,7 +135,7 @@ describe("handleVideoCreate", () => {
       "generations"
     );
 
-    expect(res.status, await res.clone().text()).toBe(200);
+    expect(res.status).toBe(200);
     expect(authMocks.getProviderCredentials).toHaveBeenCalledWith(
       providerId, expect.anything(), "video-model", expect.anything()
     );
