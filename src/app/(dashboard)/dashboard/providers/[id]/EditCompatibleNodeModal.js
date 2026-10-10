@@ -5,6 +5,7 @@ import PropTypes from "prop-types";
 import { Button, Badge, Input, Modal, Select, Toggle } from "@/shared/components";
 
 const MEDIA_SERVICE_OPTIONS = [
+  { id: "embedding", label: "Embeddings", path: "/embeddings" },
   { id: "image", label: "Image generation", path: "/images/generations" },
   { id: "tts", label: "Text to speech", path: "/audio/speech" },
   { id: "stt", label: "Speech to text", path: "/audio/transcriptions" },

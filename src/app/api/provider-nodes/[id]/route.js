@@ -63,7 +63,9 @@ export async function PUT(request, { params }) {
 
     if (node.type === "openai-compatible") {
       updates.apiType = apiType;
-      updates.serviceKinds = getNodeServiceKinds({ type: node.type, serviceKinds: serviceKinds || [] });
+      if (serviceKinds !== undefined) {
+        updates.serviceKinds = getNodeServiceKinds({ type: node.type, serviceKinds });
+      }
     }
 
     const updated = await updateProviderNode(id, updates);

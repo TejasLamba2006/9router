@@ -9,7 +9,7 @@ import { enforceModelEnabled } from "../services/modelVisibility.js";
 import { customNodeSttConfig, handleSttCore } from "open-sse/handlers/sttCore.js";
 import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
-import { AI_PROVIDERS } from "@/shared/constants/providers";
+import { AI_PROVIDERS, isOpenAICompatibleProvider } from "@/shared/constants/providers";
 import * as log from "../utils/logger.js";
 
 // Providers requiring credentials for STT
@@ -73,8 +73,9 @@ export async function handleStt(request) {
 
   const modelTransport = await resolveCustomModelTransport(provider, model);
 
-  // noAuth providers
-  if (!CREDENTIALED_PROVIDERS.has(provider)) {
+  // noAuth providers. Custom compatible nodes always need their stored API key
+  // and endpoint metadata.
+  if (!CREDENTIALED_PROVIDERS.has(provider) && !isOpenAICompatibleProvider(provider)) {
     const result = await handleSttCore({ provider, model, formData, sttConfig: AI_PROVIDERS[provider]?.sttConfig, transport: modelTransport });
     if (result.success) return result.response;
     return errorResponse(result.status || HTTP_STATUS.BAD_GATEWAY, result.error || "STT failed");

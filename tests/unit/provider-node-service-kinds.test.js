@@ -45,7 +45,7 @@ afterEach(() => {
 
 describe("custom provider node service kinds", () => {
   it("normalizes supported OpenAI-compatible services and legacy embeddings", () => {
-    expect(CUSTOM_NODE_SERVICE_KINDS).toEqual(["image", "tts", "stt", "video"]);
+    expect(CUSTOM_NODE_SERVICE_KINDS).toEqual(["embedding", "image", "tts", "stt", "video"]);
     expect(isValidNodeServiceKinds(["image", "video", "image"])).toBe(true);
     expect(isValidNodeServiceKinds(["image", "music"])).toBe(false);
     expect(getNodeServiceKinds({ type: "openai-compatible", serviceKinds: ["image", "image", "tts"] }))
@@ -62,12 +62,12 @@ describe("custom provider node service kinds", () => {
       apiType: "chat",
       baseUrl: "https://media.example/v1",
       type: "openai-compatible",
-      serviceKinds: ["image", "tts", "image"],
+      serviceKinds: ["embedding", "image", "tts", "image"],
     }));
     const body = await response.json();
 
     expect(response.status).toBe(201);
-    expect(body.node.serviceKinds).toEqual(["image", "tts"]);
+    expect(body.node.serviceKinds).toEqual(["embedding", "image", "tts"]);
   });
 
   it("updates services and mirrors them into existing connections", async () => {
@@ -133,6 +133,29 @@ describe("custom provider node service kinds", () => {
       const ids = (await buildModelsList([kind], { skipDynamicFetch: true })).map((model) => model.id);
       expect(ids).toContain(`catalog-media/${kind}-model`);
     }
+  });
+
+  it("preserves services when an update omits serviceKinds", async () => {
+    const { POST } = await import("@/app/api/provider-nodes/route.js");
+    const createdResponse = await POST(request({
+      name: "Rename Media Node",
+      prefix: "rename-media",
+      apiType: "chat",
+      baseUrl: "https://media.example/v1",
+      type: "openai-compatible",
+      serviceKinds: ["image", "tts"],
+    }));
+    const { node } = await createdResponse.json();
+    const { PUT } = await import("@/app/api/provider-nodes/[id]/route.js");
+    const response = await PUT(request({
+      name: "Renamed Media Node",
+      prefix: node.prefix,
+      apiType: node.apiType,
+      baseUrl: node.baseUrl,
+    }), { params: Promise.resolve({ id: node.id }) });
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).node.serviceKinds).toEqual(["image", "tts"]);
   });
 
   it("rejects unknown services and media services on Anthropic nodes", async () => {

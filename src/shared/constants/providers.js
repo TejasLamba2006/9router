@@ -87,7 +87,7 @@ export const MEDIA_PROVIDER_KINDS = [
 export const OPENAI_COMPATIBLE_PREFIX = "openai-compatible-";
 export const ANTHROPIC_COMPATIBLE_PREFIX = "anthropic-compatible-";
 export const CUSTOM_EMBEDDING_PREFIX = "custom-embedding-";
-export const CUSTOM_NODE_SERVICE_KINDS = Object.freeze(["image", "tts", "stt", "video"]);
+export const CUSTOM_NODE_SERVICE_KINDS = Object.freeze(["embedding", "image", "tts", "stt", "video"]);
 
 export function isValidNodeServiceKinds(serviceKinds) {
   return Array.isArray(serviceKinds)
