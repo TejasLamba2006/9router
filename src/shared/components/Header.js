@@ -77,6 +77,13 @@ const getPageInfo = (pathname) => {
       icon: "dns",
       breadcrumbs: [],
     };
+  if (pathname.includes("/basic-chat"))
+    return {
+      title: "Playground",
+      description: "Chat, generate, transcribe, and inspect model output",
+      icon: "chat",
+      breadcrumbs: [],
+    };
   if (pathname.includes("/combos"))
     return {
       title: "Combos",
