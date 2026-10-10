@@ -10,7 +10,11 @@ import {
   pendingToolCalls,
   parseToolsJson,
   pendingVideoJobs,
+  preparePlaygroundAttachments,
+  normalizeLoadedSession,
+  safeMediaSrc,
 } from "../../src/app/(dashboard)/dashboard/basic-chat/playgroundUi.js";
+import { createMemoryBlobStore } from "../../src/shared/utils/playgroundStorage.js";
 import { buildPlaygroundRequest, buildVideoPollRequest, PLAYGROUND_MODES } from "../../src/shared/utils/playgroundRequest.js";
 
 describe("mode tabs", () => {
@@ -137,6 +141,43 @@ describe("parseToolsJson", () => {
   });
 });
 
+describe("preparePlaygroundAttachments", () => {
+  it("validates, extracts text, stores bytes in the blob store and reports rejects", async () => {
+    const blobStore = createMemoryBlobStore();
+    const files = [new File(["hello"], "notes.txt", { type: "text/plain" }), new File(["MZ"], "tool.exe")];
+    const { records, rejected, errors } = await preparePlaygroundAttachments(files, { blobStore });
+    expect(rejected).toEqual([{ name: "tool.exe", reason: "unsupported-type" }]);
+    expect(errors).toEqual([]);
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ name: "notes.txt", kind: "text", text: "hello" });
+    expect(records[0]).not.toHaveProperty("dataUrl");
+    expect(await (await blobStore.get(records[0].id)).text()).toBe("hello");
+  });
+
+  it("only accepts audio for transcription", async () => {
+    const { records, rejected } = await preparePlaygroundAttachments(
+      [new File(["x"], "a.txt"), new File(["x"], "a.mp3", { type: "audio/mpeg" })],
+      { blobStore: createMemoryBlobStore(), only: "audio" },
+    );
+    expect(records.map((r) => r.kind)).toEqual(["audio"]);
+    expect(rejected).toEqual([{ name: "a.txt", reason: "audio-only" }]);
+  });
+});
+
+describe("normalizeLoadedSession", () => {
+  it("upgrades migrated basic-chat sessions to chat sessions", () => {
+    const s = normalizeLoadedSession({ id: "x", title: "Old", modelId: "openai/gpt-4o", messages: [{ role: "user", content: "hi" }] });
+    expect(s).toMatchObject({ id: "x", mode: "chat", model: "openai/gpt-4o", advanced: "", tools: "", confirmed: false });
+    expect(s.settings).toMatchObject({ stream: true });
+    expect(s.messages).toHaveLength(1);
+  });
+
+  it("marks a reload-interrupted stream as stopped instead of streaming forever", () => {
+    const s = normalizeLoadedSession({ id: "y", mode: "chat", messages: [{ role: "assistant", content: "par", status: "streaming" }] });
+    expect(s.messages[0].status).toBe("stopped");
+  });
+});
+
 describe("pendingVideoJobs", () => {
   it("finds unfinished video jobs so polling can resume after reload", () => {
     const sessions = [
@@ -147,5 +188,16 @@ describe("pendingVideoJobs", () => {
       { id: "s2", messages: [{ id: "m3", role: "assistant", result: { kind: "image" } }] },
     ];
     expect(pendingVideoJobs(sessions)).toEqual([{ sessionId: "s1", messageId: "m1", jobId: "j1", connectionId: "c" }]);
+  });
+});
+
+describe("safeMediaSrc", () => {
+  it("allows http, blob and raster/audio/video data URLs only", () => {
+    expect(safeMediaSrc("https://x/y.png")).toBe("https://x/y.png");
+    expect(safeMediaSrc("blob:http://localhost/1")).toBe("blob:http://localhost/1");
+    expect(safeMediaSrc("data:image/png;base64,AA")).toBe("data:image/png;base64,AA");
+    expect(safeMediaSrc("javascript:alert(1)")).toBeNull();
+    expect(safeMediaSrc("data:image/svg+xml,<svg/>")).toBeNull();
+    expect(safeMediaSrc("data:text/html,<b>")).toBeNull();
   });
 });

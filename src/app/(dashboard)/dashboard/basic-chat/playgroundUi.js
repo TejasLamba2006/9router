@@ -1,5 +1,6 @@
 // Pure UI helpers for the Unified Playground page. No React, no fetch, no DOM.
-import { getDefaultSettings } from "@/shared/utils/playgroundRequest";
+import { getDefaultSettings, PLAYGROUND_MODES } from "@/shared/utils/playgroundRequest";
+import { createAttachmentRecord, validateAttachmentBatch } from "@/shared/utils/playgroundAttachments";
 
 export const MODE_TABS = [
   { mode: "chat", label: "Chat", icon: "chat", kindFilter: null },
@@ -123,6 +124,49 @@ export function pendingVideoJobs(sessions) {
     }
   }
   return jobs;
+}
+
+/**
+ * Composer intake: validate the batch, extract text, keep bytes in the blob store.
+ * Records are JSON-safe (no data URLs) and can be saved with the session.
+ */
+export async function preparePlaygroundAttachments(files, { blobStore, existing = [], only, signal } = {}) {
+  const { accepted, rejected } = validateAttachmentBatch(files, existing);
+  const records = [];
+  const errors = [];
+  for (const item of accepted) {
+    if (only && item.kind !== only) { rejected.push({ name: item.name, reason: `${only}-only` }); continue; }
+    try {
+      const record = await createAttachmentRecord(item.file, { signal });
+      await blobStore.put(record.id, item.file);
+      records.push(record);
+    } catch (err) {
+      if (err?.name === "AbortError") throw err;
+      errors.push({ name: item.name, message: err?.message || String(err) });
+    }
+  }
+  return { records, rejected, errors };
+}
+
+/** Upgrade a stored (or migrated basic-chat) session to the current shape. */
+export function normalizeLoadedSession(raw) {
+  const mode = PLAYGROUND_MODES.includes(raw?.mode) ? raw.mode : "chat";
+  const base = createSession({ mode, model: raw?.model || raw?.modelId || "" });
+  return {
+    ...base,
+    ...raw,
+    mode,
+    model: base.model,
+    settings: { ...base.settings, ...(raw?.settings || {}) },
+    advanced: typeof raw?.advanced === "string" ? raw.advanced : "",
+    tools: typeof raw?.tools === "string" ? raw.tools : "",
+    confirmed: raw?.confirmed === true,
+    messages: (Array.isArray(raw?.messages) ? raw.messages : []).map((m) => ({
+      id: m.id || newId(),
+      ...m,
+      ...(m.status === "streaming" ? { status: "stopped" } : {}),
+    })),
+  };
 }
 
 // Media from model output: only network, blob and inline media URLs. Blocks javascript: and friends.
