@@ -129,14 +129,15 @@ describe("Claude extra-usage policy", () => {
     })).toBeNull();
   });
 
-  it("syncs queued extra usage after a successful request", async () => {
+  it("syncs queued extra usage after a successful request using fresh credentials and the usage cache", async () => {
     const connection = {
       id: "claude-1",
       provider: "claude",
       providerSpecificData: {},
-      accessToken: "test-token",
+      accessToken: "stale-token",
       backoffLevel: 0,
     };
+    const freshConnection = { ...connection, accessToken: "fresh-token" };
     const updateProviderConnection = vi.fn();
     const usage = {
       extraUsage: { queued: true },
@@ -145,6 +146,7 @@ describe("Claude extra-usage policy", () => {
 
     const getUsageForProvider = vi.fn().mockResolvedValue(usage);
     await syncClaudeExtraUsageStateAfterRequest(connection, {
+      getProviderConnectionById: vi.fn().mockResolvedValue(freshConnection),
       getUsageForProvider,
       resolveConnectionProxyConfig: vi.fn().mockResolvedValue({
         connectionProxyEnabled: false,
@@ -153,9 +155,8 @@ describe("Claude extra-usage policy", () => {
     });
 
     expect(getUsageForProvider).toHaveBeenCalledWith(
-      connection,
+      freshConnection,
       expect.objectContaining({ strictProxy: false }),
-      { force: true },
     );
     expect(updateProviderConnection).toHaveBeenCalledWith(
       connection.id,

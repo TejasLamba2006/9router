@@ -1,4 +1,4 @@
-import { updateProviderConnection } from "@/lib/db/index.js";
+import { getProviderConnectionById, updateProviderConnection } from "@/lib/db/index.js";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy.js";
 import {
   buildClaudeExtraUsageConnectionUpdate,
@@ -22,18 +22,16 @@ export async function syncClaudeExtraUsageStateAfterRequest(connection, deps = {
     || !isClaudeExtraUsageBlockEnabled(connection.provider, connection.providerSpecificData)
   ) return;
 
+  const getConnection = deps.getProviderConnectionById || getProviderConnectionById;
   const resolveProxy = deps.resolveConnectionProxyConfig || resolveConnectionProxyConfig;
   const fetchUsage = deps.getUsageForProvider || getUsageForProvider;
   const updateConnection = deps.updateProviderConnection || updateProviderConnection;
 
   try {
-    const proxyConfig = await resolveProxy(connection.providerSpecificData || {});
-    const usage = await fetchUsage(
-      connection,
-      buildProxyOptions(proxyConfig),
-      { force: true },
-    );
-    const update = buildClaudeExtraUsageConnectionUpdate(connection, usage);
+    const currentConnection = await getConnection(connection.id) || connection;
+    const proxyConfig = await resolveProxy(currentConnection.providerSpecificData || {});
+    const usage = await fetchUsage(currentConnection, buildProxyOptions(proxyConfig));
+    const update = buildClaudeExtraUsageConnectionUpdate(currentConnection, usage);
     if (update) await updateConnection(connection.id, update);
   } catch (error) {
     console.warn(`[Claude Usage] Request-time extra-usage sync failed: ${error.message}`);

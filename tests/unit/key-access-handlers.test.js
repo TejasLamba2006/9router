@@ -13,6 +13,7 @@ const fx = vi.hoisted(() => ({
 const mocks = vi.hoisted(() => ({
   getProviderCredentials: vi.fn(),
   handleChatCore: vi.fn(),
+  syncClaudeExtraUsageStateAfterRequest: vi.fn(),
 }));
 
 vi.mock("@/lib/localDb", () => ({
@@ -42,6 +43,9 @@ vi.mock("@/sse/services/auth.js", () => ({
 vi.mock("@/sse/services/tokenRefresh.js", () => ({
   checkAndRefreshToken: async (_p, c) => c,
   updateProviderCredentials: vi.fn(),
+}));
+vi.mock("@/sse/services/claudeExtraUsage.js", () => ({
+  syncClaudeExtraUsageStateAfterRequest: mocks.syncClaudeExtraUsageStateAfterRequest,
 }));
 vi.mock("open-sse/handlers/chatCore.js", () => ({ handleChatCore: mocks.handleChatCore }));
 
@@ -112,6 +116,26 @@ describe("chat (/v1/chat/completions, /v1/messages, /v1/responses all use handle
     }
     expect((await chat("openai/model-a", "sk-open")).status).toBe(500); // provider error, not a 403
   });
+  it("syncs Claude extra-usage state after a successful request", async () => {
+    const connection = {
+      id: "claude-1",
+      provider: "claude",
+      providerSpecificData: {},
+    };
+    mocks.getProviderCredentials.mockResolvedValue({
+      connectionId: connection.id,
+      connectionName: "mock",
+      _connection: connection,
+    });
+    mocks.handleChatCore.mockImplementationOnce(async ({ onRequestSuccess }) => {
+      await onRequestSuccess();
+      return { success: true, response: sse([ROLE, CONTENT("ok"), DONE]) };
+    });
+
+    expect((await chat("claude/claude-sonnet-4-6", "sk-open")).status).toBe(200);
+    expect(mocks.syncClaudeExtraUsageStateAfterRequest).toHaveBeenCalledWith(connection);
+  });
+
   it("restricted-to-combo key: combo 200, direct member and unlisted model 403 before any credential lookup", async () => {
     expect((await chat("Main", "sk-combo")).status).toBe(200);
     vi.clearAllMocks();
