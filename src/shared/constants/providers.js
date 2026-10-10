@@ -88,6 +88,13 @@ export const OPENAI_COMPATIBLE_PREFIX = "openai-compatible-";
 export const ANTHROPIC_COMPATIBLE_PREFIX = "anthropic-compatible-";
 export const CUSTOM_EMBEDDING_PREFIX = "custom-embedding-";
 export const CUSTOM_NODE_SERVICE_KINDS = Object.freeze(["embedding", "image", "tts", "stt", "video"]);
+export const CUSTOM_NODE_SERVICE_META = Object.freeze({
+  embedding: { label: "Embeddings", path: "/embeddings" },
+  image: { label: "Image generation", path: "/images/generations" },
+  tts: { label: "Text to speech", path: "/audio/speech" },
+  stt: { label: "Speech to text", path: "/audio/transcriptions" },
+  video: { label: "Video generation", path: "/videos/*" },
+});
 
 export function isValidNodeServiceKinds(serviceKinds) {
   return Array.isArray(serviceKinds)

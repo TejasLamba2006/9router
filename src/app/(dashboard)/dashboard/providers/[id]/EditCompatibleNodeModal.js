@@ -3,14 +3,12 @@
 import { useState, useEffect } from "react";
 import PropTypes from "prop-types";
 import { Button, Badge, Input, Modal, Select, Toggle } from "@/shared/components";
+import { CUSTOM_NODE_SERVICE_KINDS, CUSTOM_NODE_SERVICE_META } from "@/shared/constants/providers";
 
-const MEDIA_SERVICE_OPTIONS = [
-  { id: "embedding", label: "Embeddings", path: "/embeddings" },
-  { id: "image", label: "Image generation", path: "/images/generations" },
-  { id: "tts", label: "Text to speech", path: "/audio/speech" },
-  { id: "stt", label: "Speech to text", path: "/audio/transcriptions" },
-  { id: "video", label: "Video generation", path: "/videos/*" },
-];
+const MEDIA_SERVICE_OPTIONS = CUSTOM_NODE_SERVICE_KINDS.map((id) => ({
+  id,
+  ...CUSTOM_NODE_SERVICE_META[id],
+}));
 
 export default function EditCompatibleNodeModal({ isOpen, node, onSave, onClose, isAnthropic }) {
   const [formData, setFormData] = useState({

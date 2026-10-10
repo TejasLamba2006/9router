@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import PropTypes from "prop-types";
 import { Badge, Button, Input, Modal, Select, Toggle } from "@/shared/components";
+import { CUSTOM_NODE_SERVICE_KINDS, CUSTOM_NODE_SERVICE_META } from "@/shared/constants/providers";
 
 const VARIANT_CONFIG = {
   openai: {
@@ -34,13 +35,10 @@ const API_TYPE_OPTIONS = [
   { value: "responses", label: "Responses API" },
 ];
 
-const MEDIA_SERVICE_OPTIONS = [
-  { id: "embedding", label: "Embeddings", path: "/embeddings" },
-  { id: "image", label: "Image generation", path: "/images/generations" },
-  { id: "tts", label: "Text to speech", path: "/audio/speech" },
-  { id: "stt", label: "Speech to text", path: "/audio/transcriptions" },
-  { id: "video", label: "Video generation", path: "/videos/*" },
-];
+const MEDIA_SERVICE_OPTIONS = CUSTOM_NODE_SERVICE_KINDS.map((id) => ({
+  id,
+  ...CUSTOM_NODE_SERVICE_META[id],
+}));
 
 function AddCompatibleModal({ variant, isOpen, onClose, onCreated }) {
   const config = VARIANT_CONFIG[variant];

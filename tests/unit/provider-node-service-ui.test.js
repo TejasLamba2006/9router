@@ -10,10 +10,8 @@ describe("custom provider media service UI", () => {
     const add = source("src/app/(dashboard)/dashboard/providers/components/AddCompatibleModal.js");
     const edit = source("src/app/(dashboard)/dashboard/providers/[id]/EditCompatibleNodeModal.js");
 
-    for (const text of ["Image generation", "Text to speech", "Speech to text", "Video generation"]) {
-      expect(add).toContain(text);
-      expect(edit).toContain(text);
-    }
+    expect(add).toContain("CUSTOM_NODE_SERVICE_META");
+    expect(edit).toContain("CUSTOM_NODE_SERVICE_META");
     expect(add).toContain("serviceKinds: formData.serviceKinds");
     expect(edit).toContain("payload.serviceKinds = formData.serviceKinds");
   });
