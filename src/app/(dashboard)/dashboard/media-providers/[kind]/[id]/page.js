@@ -5,9 +5,10 @@ import Link from "next/link";
 import { useState, useEffect } from "react";
 import { Card, Badge, Button, AddCustomEmbeddingModal, NoAuthProxyCard, ProviderInfoCard } from "@/shared/components";
 import ProviderIcon from "@/shared/components/ProviderIcon";
-import { MEDIA_PROVIDER_KINDS, AI_PROVIDERS, isCustomEmbeddingProvider } from "@/shared/constants/providers";
+import { MEDIA_PROVIDER_KINDS, AI_PROVIDERS, getNodeServiceKinds, isCustomEmbeddingProvider, isOpenAICompatibleProvider } from "@/shared/constants/providers";
 import ConnectionsCard from "@/app/(dashboard)/dashboard/providers/components/ConnectionsCard";
 import ModelsCard from "@/app/(dashboard)/dashboard/providers/components/ModelsCard";
+import EditCompatibleNodeModal from "@/app/(dashboard)/dashboard/providers/[id]/EditCompatibleNodeModal";
 import { KIND_EXAMPLE_CONFIG } from "./components/exampleShared";
 import { EmbeddingExampleCard } from "./components/EmbeddingExampleCard";
 import { TtsExampleCard } from "./components/TtsExampleCard";
@@ -19,15 +20,15 @@ export default function MediaProviderDetailPage() {
   const { kind, id } = useParams();
   const router = useRouter();
   const kindConfig = MEDIA_PROVIDER_KINDS.find((k) => k.id === kind);
-  const isCustom = isCustomEmbeddingProvider(id) && kind === "embedding";
+  const isCustom = isCustomEmbeddingProvider(id) || isOpenAICompatibleProvider(id);
 
   const handleDeleteCustom = async () => {
-    if (!confirm("Delete this Custom Embedding node?")) return;
+    if (!confirm("Delete this custom provider node?")) return;
     try {
       const res = await fetch(`/api/provider-nodes/${id}`, { method: "DELETE" });
       if (res.ok) router.push(`/dashboard/media-providers/${kind}`);
     } catch (error) {
-      console.log("Error deleting custom embedding node:", error);
+      console.log("Error deleting custom provider node:", error);
     }
   };
 
@@ -35,7 +36,7 @@ export default function MediaProviderDetailPage() {
   const [customLoading, setCustomLoading] = useState(isCustom);
   const [showEditModal, setShowEditModal] = useState(false);
 
-  // Fetch custom node info from API for custom embedding nodes
+  // Fetch custom node info from API
   useEffect(() => {
     if (!isCustom) return;
     let cancelled = false;
@@ -54,9 +55,9 @@ export default function MediaProviderDetailPage() {
 
   const builtInProvider = AI_PROVIDERS[id];
 
-  // For custom embedding nodes, build a synthetic provider object
+  // Build a synthetic provider object for custom nodes.
   const provider = isCustom
-    ? (customNode ? { id, name: customNode.name || "Custom Embedding", color: "#6366F1", textIcon: "CE" } : null)
+    ? (customNode ? { id, name: customNode.name || "Custom Provider", color: "#6366F1", textIcon: "CP" } : null)
     : builtInProvider;
 
   if (!isCustom && !builtInProvider) return notFound();
@@ -65,8 +66,8 @@ export default function MediaProviderDetailPage() {
     return <div className="text-text-muted text-sm py-12 text-center">Loading...</div>;
   }
 
-  const kinds = isCustom ? ["embedding"] : (provider.serviceKinds ?? ["llm"]);
-  if (!isCustom && !kinds.includes(kind)) return notFound();
+  const kinds = isCustom ? getNodeServiceKinds(customNode) : (provider.serviceKinds ?? ["llm"]);
+  if (!kinds.includes(kind)) return notFound();
 
   return (
     <div className="flex flex-col gap-8">
@@ -195,13 +196,32 @@ export default function MediaProviderDetailPage() {
       {kind === "stt" && !isCustom && <SttExampleCard providerId={id} />}
       {!isCustom && KIND_EXAMPLE_CONFIG[kind] && <GenericExampleCard providerId={id} kind={kind} />}
 
-      {isCustom && (
+      {isCustomEmbeddingProvider(id) && (
         <AddCustomEmbeddingModal
           isOpen={showEditModal}
           node={customNode}
           onClose={() => setShowEditModal(false)}
           onSaved={(updated) => {
             setCustomNode(updated);
+            setShowEditModal(false);
+          }}
+        />
+      )}
+      {isOpenAICompatibleProvider(id) && (
+        <EditCompatibleNodeModal
+          isOpen={showEditModal}
+          node={customNode}
+          isAnthropic={false}
+          onClose={() => setShowEditModal(false)}
+          onSave={async (payload) => {
+            const response = await fetch(`/api/provider-nodes/${id}`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            });
+            if (!response.ok) return;
+            const { node } = await response.json();
+            setCustomNode(node);
             setShowEditModal(false);
           }}
         />

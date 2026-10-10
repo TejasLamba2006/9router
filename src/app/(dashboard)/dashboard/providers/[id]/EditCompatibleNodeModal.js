@@ -2,7 +2,14 @@
 
 import { useState, useEffect } from "react";
 import PropTypes from "prop-types";
-import { Button, Badge, Input, Modal, Select } from "@/shared/components";
+import { Button, Badge, Input, Modal, Select, Toggle } from "@/shared/components";
+
+const MEDIA_SERVICE_OPTIONS = [
+  { id: "image", label: "Image generation", path: "/images/generations" },
+  { id: "tts", label: "Text to speech", path: "/audio/speech" },
+  { id: "stt", label: "Speech to text", path: "/audio/transcriptions" },
+  { id: "video", label: "Video generation", path: "/videos/*" },
+];
 
 export default function EditCompatibleNodeModal({ isOpen, node, onSave, onClose, isAnthropic }) {
   const [formData, setFormData] = useState({
@@ -10,6 +17,7 @@ export default function EditCompatibleNodeModal({ isOpen, node, onSave, onClose,
     prefix: "",
     apiType: "chat",
     baseUrl: "https://api.openai.com/v1",
+    serviceKinds: [],
   });
   const [saving, setSaving] = useState(false);
   const [checkKey, setCheckKey] = useState("");
@@ -24,6 +32,7 @@ export default function EditCompatibleNodeModal({ isOpen, node, onSave, onClose,
         prefix: node.prefix || "",
         apiType: node.apiType || "chat",
         baseUrl: node.baseUrl || (isAnthropic ? "https://api.anthropic.com/v1" : "https://api.openai.com/v1"),
+        serviceKinds: node.serviceKinds || [],
       });
     }
   }, [node, isAnthropic]);
@@ -44,6 +53,7 @@ export default function EditCompatibleNodeModal({ isOpen, node, onSave, onClose,
       };
       if (!isAnthropic) {
         payload.apiType = formData.apiType;
+        payload.serviceKinds = formData.serviceKinds;
       }
       await onSave(payload);
     } finally {
@@ -100,6 +110,29 @@ export default function EditCompatibleNodeModal({ isOpen, node, onSave, onClose,
             onChange={(e) => setFormData({ ...formData, apiType: e.target.value })}
           />
         )}
+        {!isAnthropic && (
+          <div>
+            <label className="text-sm font-medium mb-2 block">Dedicated media endpoints</label>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {MEDIA_SERVICE_OPTIONS.map((service) => (
+                <Toggle
+                  key={service.id}
+                  checked={formData.serviceKinds.includes(service.id)}
+                  onChange={(checked) => setFormData((prev) => ({
+                    ...prev,
+                    serviceKinds: checked
+                      ? [...prev.serviceKinds, service.id]
+                      : prev.serviceKinds.filter((kind) => kind !== service.id),
+                  }))}
+                  label={service.label}
+                  description={service.path}
+                  size="sm"
+                />
+              ))}
+            </div>
+            <p className="text-xs text-text-muted mt-2">Enable only endpoints this server actually implements.</p>
+          </div>
+        )}
         <Input
           label="Base URL"
           value={formData.baseUrl}
@@ -154,6 +187,7 @@ EditCompatibleNodeModal.propTypes = {
     prefix: PropTypes.string,
     apiType: PropTypes.string,
     baseUrl: PropTypes.string,
+    serviceKinds: PropTypes.arrayOf(PropTypes.string),
   }),
   onSave: PropTypes.func.isRequired,
   onClose: PropTypes.func.isRequired,

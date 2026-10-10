@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { deleteProviderConnectionsByProvider, deleteProviderNode, getProviderConnections, getProviderNodeById, updateProviderConnection, updateProviderNode } from "@/models";
+import { getNodeServiceKinds, isValidNodeServiceKinds } from "@/shared/constants/providers";
 
 // PUT /api/provider-nodes/[id] - Update provider node
 export async function PUT(request, { params }) {
   try {
     const { id } = await params;
     const body = await request.json();
-    const { name, prefix, apiType, baseUrl } = body;
+    const { name, prefix, apiType, baseUrl, serviceKinds } = body;
     const node = await getProviderNodeById(id);
 
     if (!node) {
@@ -21,9 +22,15 @@ export async function PUT(request, { params }) {
       return NextResponse.json({ error: "Prefix is required" }, { status: 400 });
     }
 
-    // Only validate apiType for OpenAI Compatible nodes
+    // Only validate apiType and media services for OpenAI Compatible nodes
     if (node.type === "openai-compatible" && (!apiType || !["chat", "responses"].includes(apiType))) {
       return NextResponse.json({ error: "Invalid OpenAI compatible API type" }, { status: 400 });
+    }
+    if (node.type === "openai-compatible" && serviceKinds !== undefined && !isValidNodeServiceKinds(serviceKinds)) {
+      return NextResponse.json({ error: "Invalid serviceKinds" }, { status: 400 });
+    }
+    if (node.type !== "openai-compatible" && serviceKinds?.length) {
+      return NextResponse.json({ error: "serviceKinds require an OpenAI compatible node" }, { status: 400 });
     }
 
     if (!baseUrl?.trim()) {
@@ -56,6 +63,7 @@ export async function PUT(request, { params }) {
 
     if (node.type === "openai-compatible") {
       updates.apiType = apiType;
+      updates.serviceKinds = getNodeServiceKinds({ type: node.type, serviceKinds: serviceKinds || [] });
     }
 
     const updated = await updateProviderNode(id, updates);
@@ -69,6 +77,7 @@ export async function PUT(request, { params }) {
           apiType: node.type === "openai-compatible" ? apiType : undefined,
           baseUrl: sanitizedBaseUrl,
           nodeName: updated.name,
+          serviceKinds: node.type === "openai-compatible" ? updated.serviceKinds : undefined,
         }
       })
     )));

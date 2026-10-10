@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import PropTypes from "prop-types";
-import { Badge, Button, Input, Modal, Select } from "@/shared/components";
+import { Badge, Button, Input, Modal, Select, Toggle } from "@/shared/components";
 
 const VARIANT_CONFIG = {
   openai: {
@@ -34,12 +34,19 @@ const API_TYPE_OPTIONS = [
   { value: "responses", label: "Responses API" },
 ];
 
+const MEDIA_SERVICE_OPTIONS = [
+  { id: "image", label: "Image generation", path: "/images/generations" },
+  { id: "tts", label: "Text to speech", path: "/audio/speech" },
+  { id: "stt", label: "Speech to text", path: "/audio/transcriptions" },
+  { id: "video", label: "Video generation", path: "/videos/*" },
+];
+
 function AddCompatibleModal({ variant, isOpen, onClose, onCreated }) {
   const config = VARIANT_CONFIG[variant];
   const initialFormData = () => ({
     name: "",
     prefix: "",
-    ...(config.hasApiType ? { apiType: "chat" } : {}),
+    ...(config.hasApiType ? { apiType: "chat", serviceKinds: [] } : {}),
     baseUrl: config.defaultBaseUrl,
   });
 
@@ -71,7 +78,7 @@ function AddCompatibleModal({ variant, isOpen, onClose, onCreated }) {
         body: JSON.stringify({
           name: formData.name,
           prefix: formData.prefix,
-          ...(config.hasApiType ? { apiType: formData.apiType } : {}),
+          ...(config.hasApiType ? { apiType: formData.apiType, serviceKinds: formData.serviceKinds } : {}),
           baseUrl: formData.baseUrl,
           type: config.type,
         }),
@@ -157,6 +164,29 @@ function AddCompatibleModal({ variant, isOpen, onClose, onCreated }) {
             value={formData.apiType}
             onChange={(e) => setFormData({ ...formData, apiType: e.target.value })}
           />
+        )}
+        {config.hasApiType && (
+          <div>
+            <label className="text-sm font-medium mb-2 block">Dedicated media endpoints</label>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {MEDIA_SERVICE_OPTIONS.map((service) => (
+                <Toggle
+                  key={service.id}
+                  checked={formData.serviceKinds.includes(service.id)}
+                  onChange={(checked) => setFormData((prev) => ({
+                    ...prev,
+                    serviceKinds: checked
+                      ? [...prev.serviceKinds, service.id]
+                      : prev.serviceKinds.filter((kind) => kind !== service.id),
+                  }))}
+                  label={service.label}
+                  description={service.path}
+                  size="sm"
+                />
+              ))}
+            </div>
+            <p className="text-xs text-text-muted mt-2">Enable only endpoints this server actually implements.</p>
+          </div>
         )}
         <Input
           label="Base URL"

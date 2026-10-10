@@ -33,7 +33,7 @@ async function setupTestContext(nodeData) {
     POST,
     getProviderConnections,
     cleanup() {
-      fs.rmSync(tempDir, { recursive: true, force: true });
+      try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch {}
     },
   };
 }
@@ -91,6 +91,7 @@ describe("compatible provider connections API", () => {
       prefix: "oct",
       apiType: "chat",
       baseUrl: "https://openai-compatible.test/v1",
+      serviceKinds: ["image", "tts"],
     });
     cleanup = ctx.cleanup;
 
@@ -111,6 +112,7 @@ describe("compatible provider connections API", () => {
         apiType: "chat",
         baseUrl: ctx.node.baseUrl,
         nodeName: ctx.node.name,
+        serviceKinds: ["image", "tts"],
       },
     });
   });

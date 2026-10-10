@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createProviderNode, getProviderNodes } from "@/models";
-import { OPENAI_COMPATIBLE_PREFIX, ANTHROPIC_COMPATIBLE_PREFIX, CUSTOM_EMBEDDING_PREFIX } from "@/shared/constants/providers";
+import { OPENAI_COMPATIBLE_PREFIX, ANTHROPIC_COMPATIBLE_PREFIX, CUSTOM_EMBEDDING_PREFIX, getNodeServiceKinds, isValidNodeServiceKinds } from "@/shared/constants/providers";
 import { generateId } from "@/shared/utils";
 
 export const dynamic = "force-dynamic";
@@ -32,7 +32,7 @@ export async function GET() {
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { name, prefix, apiType, baseUrl, type } = body;
+    const { name, prefix, apiType, baseUrl, type, serviceKinds } = body;
 
     if (!name?.trim()) {
       return NextResponse.json({ error: "Name is required" }, { status: 400 });
@@ -49,6 +49,9 @@ export async function POST(request) {
       if (!apiType || !["chat", "responses"].includes(apiType)) {
         return NextResponse.json({ error: "Invalid OpenAI compatible API type" }, { status: 400 });
       }
+      if (serviceKinds !== undefined && !isValidNodeServiceKinds(serviceKinds)) {
+        return NextResponse.json({ error: "Invalid serviceKinds" }, { status: 400 });
+      }
 
       const node = await createProviderNode({
         id: `${OPENAI_COMPATIBLE_PREFIX}${apiType}-${generateId()}`,
@@ -57,8 +60,13 @@ export async function POST(request) {
         apiType,
         baseUrl: (baseUrl || OPENAI_COMPATIBLE_DEFAULTS.baseUrl).trim(),
         name: name.trim(),
+        serviceKinds: getNodeServiceKinds({ type: nodeType, serviceKinds }),
       });
       return NextResponse.json({ node }, { status: 201 });
+    }
+
+    if (nodeType !== "openai-compatible" && serviceKinds?.length) {
+      return NextResponse.json({ error: "serviceKinds require an OpenAI compatible node" }, { status: 400 });
     }
 
     if (nodeType === "custom-embedding") {
