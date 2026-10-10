@@ -5,6 +5,7 @@ import Card from "@/shared/components/Card";
 import Button from "@/shared/components/Button";
 import Drawer from "@/shared/components/Drawer";
 import Pagination from "@/shared/components/Pagination";
+import TokenValue from "@/shared/components/TokenValue";
 import { cn } from "@/shared/utils/cn";
 import { AI_PROVIDERS, getProviderByAlias } from "@/shared/constants/providers";
 
@@ -297,16 +298,16 @@ export default function RequestDetailsTab() {
                        </span>
                      </td>
                     <td className="p-4 text-sm text-text-main text-right font-mono">
-                      {getInputTokens(detail.tokens).toLocaleString()}
+                      <TokenValue value={getInputTokens(detail.tokens)} />
                     </td>
                     <td className="p-4 text-sm text-text-main text-right font-mono">
-                      {getCachedTokens(detail.tokens) > 0 ? getCachedTokens(detail.tokens).toLocaleString() : "—"}
+                      {getCachedTokens(detail.tokens) > 0 ? <TokenValue value={getCachedTokens(detail.tokens)} /> : "—"}
                     </td>
                     <td className="p-4 text-sm text-text-main text-right font-mono">
-                      {getCacheCreationTokens(detail.tokens) > 0 ? getCacheCreationTokens(detail.tokens).toLocaleString() : "—"}
+                      {getCacheCreationTokens(detail.tokens) > 0 ? <TokenValue value={getCacheCreationTokens(detail.tokens)} /> : "—"}
                     </td>
                     <td className="p-4 text-sm text-text-main text-right font-mono">
-                      {detail.tokens?.completion_tokens?.toLocaleString() || 0}
+                      <TokenValue value={detail.tokens?.completion_tokens || 0} />
                     </td>
                     <td className="p-4 text-sm text-text-muted">
                       <div className="flex flex-col gap-0.5">
@@ -386,14 +387,14 @@ export default function RequestDetailsTab() {
               <div>
                 <span className="text-text-muted">Input Tokens:</span>{" "}
                 <span className="text-text-main font-mono">
-                  {getInputTokens(selectedDetail.tokens).toLocaleString()}
+                  <TokenValue value={getInputTokens(selectedDetail.tokens)} />
                 </span>
               </div>
               {getCachedTokens(selectedDetail.tokens) > 0 && (
                 <div>
                   <span className="text-text-muted">Cached Tokens:</span>{" "}
                   <span className="text-text-main font-mono">
-                    {getCachedTokens(selectedDetail.tokens).toLocaleString()}
+                    <TokenValue value={getCachedTokens(selectedDetail.tokens)} />
                   </span>
                 </div>
               )}
@@ -401,14 +402,14 @@ export default function RequestDetailsTab() {
                 <div>
                   <span className="text-text-muted">Cache Creation:</span>{" "}
                   <span className="text-text-main font-mono">
-                    {getCacheCreationTokens(selectedDetail.tokens).toLocaleString()}
+                    <TokenValue value={getCacheCreationTokens(selectedDetail.tokens)} />
                   </span>
                 </div>
               )}
               <div>
                 <span className="text-text-muted">Output Tokens:</span>{" "}
                 <span className="text-text-main font-mono">
-                  {selectedDetail.tokens?.completion_tokens?.toLocaleString() || 0}
+                  <TokenValue value={selectedDetail.tokens?.completion_tokens || 0} />
                 </span>
               </div>
             </div>
@@ -431,11 +432,11 @@ export default function RequestDetailsTab() {
                   <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
                     <div>
                       <span className="text-text-muted block text-xs">Original (est.)</span>
-                      <span className="font-mono">{(selectedDetail.pxpipe.tokensBeforeEst || 0).toLocaleString()} tokens</span>
+                      <span className="font-mono"><TokenValue value={selectedDetail.pxpipe.tokensBeforeEst || 0} /></span>
                     </div>
                     <div>
                       <span className="text-text-muted block text-xs">Compressed (est.)</span>
-                      <span className="font-mono">{(selectedDetail.pxpipe.tokensAfterEst || 0).toLocaleString()} tokens</span>
+                      <span className="font-mono"><TokenValue value={selectedDetail.pxpipe.tokensAfterEst || 0} /></span>
                     </div>
                     <div>
                       <span className="text-text-muted block text-xs">Saved</span>

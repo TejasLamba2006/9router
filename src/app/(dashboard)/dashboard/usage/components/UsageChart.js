@@ -12,12 +12,12 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import Card from "@/shared/components/Card";
+import {
+  formatCompactTokens,
+  formatExactTokens,
+} from "@/shared/utils/usageTokenFormat";
 
-const fmtTokens = (n) => {
-  if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
-  return String(n || 0);
-};
+const fmtTokens = formatCompactTokens;
 
 const fmtCost = (n) => `$${(n || 0).toFixed(4)}`;
 const fmtRequests = (n) => String(n || 0);
@@ -121,7 +121,10 @@ export default function UsageChart({ period = "7d" }) {
                 borderRadius: "8px",
                 fontSize: "12px",
               }}
-              formatter={(value) => [cfg.formatter(value), cfg.label]}
+              formatter={(value) => [
+                viewMode === "tokens" ? formatExactTokens(value) : cfg.formatter(value),
+                cfg.label,
+              ]}
             />
             <Area
               type="monotone"

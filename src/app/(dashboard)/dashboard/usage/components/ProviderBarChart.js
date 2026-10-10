@@ -13,14 +13,14 @@ import {
   Cell,
 } from "recharts";
 import Card from "@/shared/components/Card";
+import {
+  formatCompactTokens,
+  formatExactTokens,
+} from "@/shared/utils/usageTokenFormat";
 
 const COLORS = ["#6366f1", "#14b8a6", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4", "#10b981", "#f97316"];
 
-const fmtTokens = (n) => {
-  if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
-  return String(n || 0);
-};
+const fmtTokens = formatCompactTokens;
 
 export default function ProviderBarChart({ byProvider }) {
   const [viewMode, setViewMode] = useState("tokens");
@@ -88,7 +88,10 @@ export default function ProviderBarChart({ byProvider }) {
                 borderRadius: "8px",
                 fontSize: "12px",
               }}
-              formatter={(value) => [fmt(value), label]}
+              formatter={(value) => [
+                viewMode === "tokens" ? formatExactTokens(value) : fmt(value),
+                label,
+              ]}
             />
             <Bar dataKey={viewMode} radius={[4, 4, 0, 0]}>
               {chartData.map((_, i) => (

@@ -2,6 +2,7 @@
 
 import PropTypes from "prop-types";
 import Card from "@/shared/components/Card";
+import TokenValue from "@/shared/components/TokenValue";
 
 const fmt = (n) => new Intl.NumberFormat().format(n || 0);
 const fmtCost = (n) => `$${(n || 0).toFixed(2)}`;
@@ -15,15 +16,15 @@ export default function OverviewCards({ stats }) {
       </Card>
       <Card className="flex min-w-0 flex-col items-center text-center gap-1 px-3 py-3 sm:px-4">
         <span className="text-text-muted text-xs uppercase font-semibold sm:text-sm">Total Input Tokens</span>
-        <span className="w-full truncate text-lg font-bold text-primary xl:text-xl" title={fmt(stats.totalPromptTokens)}>{fmt(stats.totalPromptTokens)}</span>
+        <TokenValue value={stats.totalPromptTokens} className="w-full truncate text-lg font-bold text-primary xl:text-xl" />
       </Card>
       <Card className="flex min-w-0 flex-col items-center text-center gap-1 px-3 py-3 sm:px-4">
         <span className="text-text-muted text-xs uppercase font-semibold sm:text-sm">Cached Tokens</span>
-        <span className="w-full truncate text-lg font-bold text-info xl:text-xl" title={fmt(stats.totalCachedTokens)}>{fmt(stats.totalCachedTokens)}</span>
+        <TokenValue value={stats.totalCachedTokens} className="w-full truncate text-lg font-bold text-info xl:text-xl" />
       </Card>
       <Card className="flex min-w-0 flex-col items-center text-center gap-1 px-3 py-3 sm:px-4">
         <span className="text-text-muted text-xs uppercase font-semibold sm:text-sm">Output Tokens</span>
-        <span className="w-full truncate text-lg font-bold text-success xl:text-xl" title={fmt(stats.totalCompletionTokens)}>{fmt(stats.totalCompletionTokens)}</span>
+        <TokenValue value={stats.totalCompletionTokens} className="w-full truncate text-lg font-bold text-success xl:text-xl" />
       </Card>
       <Card className="flex min-w-0 flex-col items-center text-center gap-1 px-3 py-3 sm:px-4">
         <span className="text-text-muted text-xs uppercase font-semibold sm:text-sm">Est. Cost</span>
