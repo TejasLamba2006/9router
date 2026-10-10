@@ -5,7 +5,7 @@ import {
   extractApiKey,
   isValidApiKey,
 } from "../services/auth.js";
-import { getSettings, getProviderConnectionById } from "@/lib/localDb";
+import { getSettings, getProviderConnectionById, getProviderNodes } from "@/lib/localDb";
 import { getModelInfo } from "../services/model.js";
 import { getKeyAccessContext, enforceKeyAccessResolved } from "../services/keyAccess.js";
 import { enforceModelEnabled } from "../services/modelVisibility.js";
@@ -24,13 +24,20 @@ const DEFAULT_VIDEO_PROVIDER = "xai";
  * connection (`x-connection-id`, returned on create) or an explicit
  * `?provider=` — falling back to the historical xAI default.
  */
+async function isVideoProvider(provider) {
+  if (getVideoConfig(provider)) return true;
+  if (!provider?.startsWith?.("openai-compatible-")) return false;
+  const nodes = await getProviderNodes({ type: "openai-compatible" }).catch(() => []);
+  return nodes.some((node) => node.id === provider && node.serviceKinds?.includes("video"));
+}
+
 async function resolveGetProvider(request, connectionId) {
   if (connectionId) {
     const conn = await getProviderConnectionById(connectionId).catch(() => null);
-    if (conn?.provider && getVideoConfig(conn.provider)) return conn.provider;
+    if (conn?.provider && await isVideoProvider(conn.provider)) return conn.provider;
   }
   const queried = new URL(request.url).searchParams.get("provider");
-  if (queried && getVideoConfig(queried)) return queried;
+  if (queried && await isVideoProvider(queried)) return queried;
   return DEFAULT_VIDEO_PROVIDER;
 }
 
@@ -85,7 +92,7 @@ async function resolveVideoProvider(parsedBody) {
   if (!modelInfo.provider) {
     return { error: errorResponse(HTTP_STATUS.BAD_REQUEST, "Combos are not supported for video generation") };
   }
-  if (!getVideoConfig(modelInfo.provider)) {
+  if (!await isVideoProvider(modelInfo.provider)) {
     // Bare model ids (no explicit "provider/" prefix) fall back to the default
     // video provider — the prefix-less inference targets chat providers only.
     if (!modelStr.includes("/")) {

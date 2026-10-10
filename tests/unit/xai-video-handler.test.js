@@ -24,15 +24,19 @@ const tokenMocks = vi.hoisted(() => ({
   checkAndRefreshToken: vi.fn(async (_p, creds) => creds),
   updateProviderCredentials: vi.fn(async () => {}),
 }));
+const dbMocks = vi.hoisted(() => ({
+  getProviderConnectionById: vi.fn(async () => ({ id: "conn-5", provider: "xai" })),
+  getProviderNodes: vi.fn(async () => []),
+}));
 
 vi.mock("@/sse/services/auth.js", () => authMocks);
 vi.mock("@/sse/services/tokenRefresh.js", () => tokenMocks);
 vi.mock("@/lib/localDb", () => ({
   getSettings: vi.fn(async () => ({ requireApiKey: false })),
-  getProviderConnectionById: vi.fn(async () => ({ id: "conn-5", provider: "xai" })),
+  getProviderConnectionById: dbMocks.getProviderConnectionById,
   getComboByName: vi.fn(async () => null),
   getModelAliases: vi.fn(async () => ({})),
-  getProviderNodes: vi.fn(async () => []),
+  getProviderNodes: dbMocks.getProviderNodes,
 }));
 vi.mock("@/sse/utils/logger.js", () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }));
 
@@ -64,6 +68,8 @@ beforeEach(() => {
   authMocks.markAccountUnavailable.mockClear();
   authMocks.clearAccountError.mockClear();
   tokenMocks.checkAndRefreshToken.mockClear();
+  dbMocks.getProviderConnectionById.mockReset().mockResolvedValue({ id: "conn-5", provider: "xai" });
+  dbMocks.getProviderNodes.mockReset().mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -105,6 +111,35 @@ describe("handleVideoCreate", () => {
     expect(res.status).toBe(400);
     expect(await res.text()).toContain("does not support video generation");
     expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it("routes an opted-in compatible node before static video config exists", async () => {
+    const providerId = "openai-compatible-chat-node-1";
+    dbMocks.getProviderNodes.mockResolvedValue([{
+      id: providerId,
+      type: "openai-compatible",
+      prefix: "media-node",
+      baseUrl: "https://media.example/v1",
+      serviceKinds: ["video"],
+    }]);
+    authMocks.getProviderCredentials.mockResolvedValueOnce(account({
+      providerSpecificData: {
+        baseUrl: "https://media.example/v1",
+        serviceKinds: ["video"],
+      },
+    }));
+    global.fetch.mockResolvedValueOnce(jsonResponse({ request_id: "custom-1" }));
+
+    const res = await handleVideoCreate(
+      makeRequest({ model: "media-node/video-model", prompt: "x" }),
+      "generations"
+    );
+
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(authMocks.getProviderCredentials).toHaveBeenCalledWith(
+      providerId, expect.anything(), "video-model", expect.anything()
+    );
+    expect(global.fetch.mock.calls[0][0]).toBe("https://media.example/v1/videos/generations");
   });
 
   it("returns the serving connection id in x-9router-connection-id", async () => {
