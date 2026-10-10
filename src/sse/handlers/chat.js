@@ -28,6 +28,7 @@ import { stripModelContextMarker } from "open-sse/utils/modelMarkers.js";
 import { hasNativeWebSearchTool, resolveWebSearchRouteOverride } from "open-sse/services/webSearchRouting.js";
 import { getKeyAccessContext, enforceKeyAccess, filterAdapterModels } from "../services/keyAccess.js";
 import { enforceModelEnabled, filterEnabledModels } from "../services/modelVisibility.js";
+import { syncClaudeExtraUsageStateAfterRequest } from "../services/claudeExtraUsage.js";
 
 /**
  * Handle chat completion request
@@ -360,6 +361,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       },
       onRequestSuccess: async () => {
         await clearAccountError(credentials.connectionId, credentials, model);
+        await syncClaudeExtraUsageStateAfterRequest(credentials._connection);
         // "Consecutive" strikes: a success clears the breaker for this pair.
         clearAntigravityStrikes(credentials.connectionId, model);
       }

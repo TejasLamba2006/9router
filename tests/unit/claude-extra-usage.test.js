@@ -7,6 +7,7 @@ import {
   isClaudeExtraUsageBlockEnabled,
 } from "@/lib/providers/claudeExtraUsage.js";
 import { parseQuotaData } from "@/app/(dashboard)/dashboard/usage/components/ProviderLimits/utils.js";
+import { syncClaudeExtraUsageStateAfterRequest } from "@/sse/services/claudeExtraUsage.js";
 
 function futureIso(ms = 60_000) {
   return new Date(Date.now() + ms).toISOString();
@@ -126,6 +127,65 @@ describe("Claude extra-usage policy", () => {
       extraUsage: null,
       quotas: {},
     })).toBeNull();
+  });
+
+  it("syncs queued extra usage after a successful request", async () => {
+    const connection = {
+      id: "claude-1",
+      provider: "claude",
+      providerSpecificData: {},
+      accessToken: "test-token",
+      backoffLevel: 0,
+    };
+    const updateProviderConnection = vi.fn();
+    const usage = {
+      extraUsage: { queued: true },
+      quotas: { "session (5h)": { resetAt: futureIso() } },
+    };
+
+    const getUsageForProvider = vi.fn().mockResolvedValue(usage);
+    await syncClaudeExtraUsageStateAfterRequest(connection, {
+      getUsageForProvider,
+      resolveConnectionProxyConfig: vi.fn().mockResolvedValue({
+        connectionProxyEnabled: false,
+      }),
+      updateProviderConnection,
+    });
+
+    expect(getUsageForProvider).toHaveBeenCalledWith(
+      connection,
+      expect.objectContaining({ strictProxy: false }),
+      { force: true },
+    );
+    expect(updateProviderConnection).toHaveBeenCalledWith(
+      connection.id,
+      expect.objectContaining({
+        lastErrorSource: CLAUDE_EXTRA_USAGE_ERROR_SOURCE,
+        testStatus: "unavailable",
+      }),
+    );
+  });
+
+  it("skips request-time usage fetch when paid credits are explicitly allowed", async () => {
+    const getUsageForProvider = vi.fn();
+
+    await syncClaudeExtraUsageStateAfterRequest({
+      id: "claude-1",
+      provider: "claude",
+      providerSpecificData: { blockExtraUsage: false },
+    }, { getUsageForProvider });
+
+    expect(getUsageForProvider).not.toHaveBeenCalled();
+  });
+
+  it("fails open when request-time usage sync errors", async () => {
+    await expect(syncClaudeExtraUsageStateAfterRequest({
+      id: "claude-1",
+      provider: "claude",
+      providerSpecificData: {},
+    }, {
+      resolveConnectionProxyConfig: vi.fn().mockRejectedValue(new Error("proxy down")),
+    })).resolves.toBeUndefined();
   });
 });
 
