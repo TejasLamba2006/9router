@@ -164,17 +164,21 @@ async function executeWebSearch(args, log) {
   return runSingleSearch(providerInput, args, log);
 }
 
+// Gemini function names cannot start with a digit, so the openai->gemini translator sends
+// "9router_web_search" as "_9router_web_search" and the model echoes that back.
+const isFallbackToolName = (name, toolName) => name === toolName || name === `_${toolName}`;
+
 export function extractHandledCalls(response, sourceFormat, toolName) {
   const calls = [];
   if (sourceFormat === FORMATS.CLAUDE) {
     for (const block of Array.isArray(response.content) ? response.content : []) {
-      if (block?.type === CLAUDE_BLOCK.TOOL_USE && block.name === toolName) {
+      if (block?.type === CLAUDE_BLOCK.TOOL_USE && isFallbackToolName(block.name, toolName)) {
         calls.push({ id: block.id, args: toRecord(block.input) });
       }
     }
   } else if (sourceFormat === FORMATS.OPENAI_RESPONSES) {
     for (const item of Array.isArray(response.output) ? response.output : []) {
-      if (item?.type === RESPONSES_ITEM.FUNCTION_CALL && item.name === toolName) {
+      if (item?.type === RESPONSES_ITEM.FUNCTION_CALL && isFallbackToolName(item.name, toolName)) {
         calls.push({ id: item.call_id, args: parseArgs(item.arguments) });
       }
     }
@@ -182,7 +186,7 @@ export function extractHandledCalls(response, sourceFormat, toolName) {
     const message = toRecord(toRecord(response.choices?.[0]).message);
     const toolCalls = Array.isArray(response.tool_calls) ? response.tool_calls : message.tool_calls;
     for (const call of Array.isArray(toolCalls) ? toolCalls : []) {
-      if (call?.function?.name === toolName) {
+      if (isFallbackToolName(call?.function?.name, toolName)) {
         calls.push({ id: call.id, args: parseArgs(call.function.arguments) });
       }
     }

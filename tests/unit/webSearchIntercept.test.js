@@ -98,6 +98,12 @@ describe("applyWebSearchFallback", () => {
     expect(out.stop_sequence).toBeNull();
   });
 
+  it("matches the fallback tool when Gemini prefixes a leading underscore", async () => {
+    const response = { type: "message", content: [{ type: "tool_use", id: "tu_1", name: "_9router_web_search", input: { query: "q" } }], stop_reason: "tool_use" };
+    const out = await applyWebSearchFallback({ translatedResponse: response, sourceFormat: "claude", fallbackPlan: PLAN, log: {} });
+    expect(out.content.map((b) => b.type)).toEqual(["server_tool_use", "web_search_tool_result", "text"]);
+  });
+
   it("preserves a remaining client-owned tool_use after the injected result", async () => {
     const response = {
       type: "message",

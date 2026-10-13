@@ -51,6 +51,13 @@ describe("applyWebFetchFallback", () => {
     expect(mocks.handleFetch.mock.calls[0][0].headers.get("authorization")).toBe("Bearer k");
   });
 
+  it("matches the tool name when Gemini prefixes a leading underscore", async () => {
+    const r = resp("https://example.com/a");
+    r.content[0].name = "_9router_web_fetch";
+    const out = await run(r);
+    expect(out.content.map((b) => b.type)).toEqual(["server_tool_use", "web_fetch_tool_result", "text"]);
+  });
+
   it("keeps an existing web_search counter additive", async () => {
     const r = { ...resp("https://example.com/a"), usage: { server_tool_use: { web_search_requests: 2 } } };
     const out = await run(r);
