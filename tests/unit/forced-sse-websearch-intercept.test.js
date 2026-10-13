@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   clearAccountError: vi.fn(),
   checkAndRefreshToken: vi.fn(),
   updateProviderCredentials: vi.fn(),
+  handleFetch: vi.fn(),
 }));
 
 vi.mock("@/sse/services/auth.js", () => ({
@@ -36,6 +37,12 @@ vi.mock("@/shared/constants/providers.js", () => ({
 vi.mock("open-sse/handlers/search/index.js", () => ({
   handleSearchCore: mocks.handleSearchCore,
 }));
+vi.mock("@/sse/handlers/fetch.js", () => ({
+  handleFetch: mocks.handleFetch,
+}));
+vi.mock("@/shared/utils/ssrfGuard.js", () => ({
+  assertPublicUrlResolved: vi.fn(async () => {}),
+}));
 vi.mock("@/lib/usageDb.js", () => ({
   appendRequestLog: vi.fn(async () => {}),
   saveRequestDetail: vi.fn(async () => {}),
@@ -54,7 +61,8 @@ const SEARCH_DATA = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.getSettings.mockResolvedValue({ webSearchFallbackProvider: "tavily" });
+  mocks.getSettings.mockResolvedValue({ webSearchFallbackProvider: "tavily", webFetchFallbackProvider: "firecrawl" });
+  mocks.handleFetch.mockImplementation(async () => new Response(JSON.stringify({ title: "T", content: { text: "page body" } }), { status: 200 }));
   mocks.getCombos.mockResolvedValue([]);
   mocks.getProviderCredentials.mockResolvedValue({ connectionId: "c1", accessToken: "t" });
   mocks.checkAndRefreshToken.mockResolvedValue({ accessToken: "t" });
@@ -234,5 +242,59 @@ describe("forced-SSE path returns Claude shape to Claude clients", () => {
     const json = await result.response.json();
     expect(json.object).toBe("chat.completion");
     expect(json.choices[0].message.content).toBe("Hi there");
+  });
+});
+
+describe("forced-SSE path runs the web-fetch intercept", () => {
+  const FETCH_PLAN = {
+    enabled: true, toolName: "9router_web_fetch", convertedToolCount: 1,
+    policy: { maxUses: null, allowedDomains: null, blockedDomains: null, maxContentTokens: null, citations: false },
+    priorUrls: ["https://example.com/a"],
+  };
+  const BS_N = String.fromCharCode(10, 10);
+  const fetchSse = (name, args) => [
+    `data: {"id":"c3","object":"chat.completion.chunk","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_f","type":"function","function":{"name":"${name}","arguments":${JSON.stringify(JSON.stringify(args))}}}]},"finish_reason":null}]}`,
+    'data: {"id":"c3","object":"chat.completion.chunk","choices":[{"delta":{},"finish_reason":"tool_calls"}]}',
+    "data: [DONE]",
+    "",
+  ].join(BS_N);
+
+  it("rewrites a Claude client response into web_fetch blocks (chat SSE source)", async () => {
+    const result = await handleForcedSSEToJson(baseCtx({
+      providerResponse: sseResponse(fetchSse("9router_web_fetch", { url: "https://example.com/a" })),
+      sourceFormat: FORMATS.CLAUDE,
+      targetFormat: FORMATS.OPENAI,
+      webFetchFallbackPlan: FETCH_PLAN,
+    }));
+    const json = await result.response.json();
+    expect(mocks.handleFetch).toHaveBeenCalledTimes(1);
+    expect(json.content.map((b) => b.type)).toEqual(["server_tool_use", "web_fetch_tool_result", "text"]);
+    expect(json.usage.server_tool_use.web_fetch_requests).toBe(1);
+    expect(json.stop_reason).toBe("end_turn");
+  });
+
+  it("serves a search plan and a fetch plan together without cross-handling", async () => {
+    const result = await handleForcedSSEToJson(baseCtx({
+      providerResponse: sseResponse(fetchSse("9router_web_fetch", { url: "https://example.com/a" })),
+      sourceFormat: FORMATS.CLAUDE,
+      targetFormat: FORMATS.OPENAI,
+      webSearchFallbackPlan: PLAN,
+      webFetchFallbackPlan: FETCH_PLAN,
+    }));
+    const json = await result.response.json();
+    expect(mocks.handleSearchCore).not.toHaveBeenCalled();
+    expect(mocks.handleFetch).toHaveBeenCalledTimes(1);
+    expect(json.content[1].type).toBe("web_fetch_tool_result");
+  });
+
+  it("leaves the response untouched without a fetch plan", async () => {
+    const result = await handleForcedSSEToJson(baseCtx({
+      providerResponse: sseResponse(fetchSse("9router_web_fetch", { url: "https://example.com/a" })),
+      sourceFormat: FORMATS.CLAUDE,
+      targetFormat: FORMATS.OPENAI,
+    }));
+    expect(mocks.handleFetch).not.toHaveBeenCalled();
+    const json = await result.response.json();
+    expect(json.content[0].type).toBe("tool_use");
   });
 });

@@ -6,6 +6,7 @@ import { FORMATS } from "../../translator/formats.js";
 import { PROVIDERS } from "../../config/providers.js";
 import { buildRequestDetail, extractRequestConfig, saveUsageStats, formatDoneLine } from "./requestDetail.js";
 import { applyWebSearchFallback } from "./webSearchIntercept.js";
+import { applyWebFetchFallback } from "./webFetchIntercept.js";
 import { openAICompletionToClaudeMessage } from "./claudeMessage.js";
 import { ROLE, RESPONSES_ITEM } from "../../translator/schema/index.js";
 
@@ -50,6 +51,12 @@ function extractCustomToolInput(argumentsValue) {
     if (parsed && typeof parsed === "object" && typeof parsed.input === "string") return parsed.input;
   } catch { /* raw freeform input */ }
   return argumentsText;
+}
+
+// Search first, then fetch; each is a no-op unless its own plan is enabled.
+async function applyRedirects(response, { sourceFormat, webSearchFallbackPlan, webFetchFallbackPlan, apiKey, log }) {
+  const searched = await applyWebSearchFallback({ translatedResponse: response, sourceFormat, fallbackPlan: webSearchFallbackPlan, log });
+  return applyWebFetchFallback({ translatedResponse: searched, sourceFormat, fallbackPlan: webFetchFallbackPlan, apiKey, log });
 }
 
 function chatCompletionToResponses(responseBody, customToolNames = null) {
@@ -186,7 +193,7 @@ export function parseSSEToOpenAIResponse(rawSSE, fallbackModel) {
 // return site below, same as nonStreamingHandler.js does on the plain JSON path.
 // Without this, a forced-streaming provider hides the search call in SSE and the
 // converted JSON reaches the client as an unanswered tool call.
-export async function handleForcedSSEToJson({ providerResponse, sourceFormat, targetFormat, provider, model, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, customToolNames, webSearchFallbackPlan, toolNameMap, trackDone, appendLog, reqTag, log, recordTelemetry = true }) {
+export async function handleForcedSSEToJson({ providerResponse, sourceFormat, targetFormat, provider, model, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, customToolNames, webSearchFallbackPlan, webFetchFallbackPlan, toolNameMap, trackDone, appendLog, reqTag, log, recordTelemetry = true }) {
   const contentType = providerResponse.headers.get("content-type") || "";
   const isSSE = contentType.includes("text/event-stream") || (contentType === "" && isResponsesProvider(provider));
   if (!isSSE) return null; // not handled here
@@ -232,7 +239,7 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
 
       // Client is Responses API → return as-is
       if (sourceFormat === FORMATS.OPENAI_RESPONSES) {
-        const intercepted = await applyWebSearchFallback({ translatedResponse: jsonResponse, sourceFormat, fallbackPlan: webSearchFallbackPlan, log });
+        const intercepted = await applyRedirects(jsonResponse, { sourceFormat, webSearchFallbackPlan, webFetchFallbackPlan, apiKey, log });
         return { success: true, response: new Response(JSON.stringify(restoreToolNames(intercepted, toolNameMap)), { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } }) };
       }
 
@@ -297,7 +304,7 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
         finalResp = openAICompletionToClaudeMessage(finalResp);
       }
 
-      const interceptedResp = await applyWebSearchFallback({ translatedResponse: finalResp, sourceFormat, fallbackPlan: webSearchFallbackPlan, log });
+      const interceptedResp = await applyRedirects(finalResp, { sourceFormat, webSearchFallbackPlan, webFetchFallbackPlan, apiKey, log });
       return { success: true, response: new Response(JSON.stringify(restoreToolNames(interceptedResp, toolNameMap)), { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } }) };
     } catch (err) {
       console.error("[ChatCore] Responses API SSE→JSON failed:", err);
@@ -380,7 +387,7 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
         ? openAICompletionToClaudeMessage(parsed)
         : parsed;
 
-    const interceptedBody = await applyWebSearchFallback({ translatedResponse: finalBody, sourceFormat, fallbackPlan: webSearchFallbackPlan, log });
+    const interceptedBody = await applyRedirects(finalBody, { sourceFormat, webSearchFallbackPlan, webFetchFallbackPlan, apiKey, log });
     return { success: true, response: new Response(JSON.stringify(restoreToolNames(interceptedBody, toolNameMap)), { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } }) };
   } catch (err) {
     console.error("[ChatCore] Chat Completions SSE→JSON failed:", err);

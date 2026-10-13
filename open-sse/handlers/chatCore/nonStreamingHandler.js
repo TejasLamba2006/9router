@@ -14,6 +14,7 @@ import { decloakToolNames } from "../../utils/claudeCloaking.js";
 import { restoreToolNames } from "../../utils/opencodeFingerprint.js";
 import { ROLE, RESPONSES_ITEM } from "../../translator/schema/index.js";
 import { applyWebSearchFallback } from "./webSearchIntercept.js";
+import { applyWebFetchFallback } from "./webFetchIntercept.js";
 
 /**
  * Convert an OpenAI Chat Completions non-streaming response body into the
@@ -235,7 +236,7 @@ export function translateNonStreamingResponse(responseBody, targetFormat, source
 /**
  * Handle non-streaming response from provider.
  */
-export async function handleNonStreamingResponse({ providerResponse, provider, model, sourceFormat, targetFormat, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, reqLogger, toolNameMap, customToolNames, trackDone, appendLog, pxpipe, reqTag, log, webSearchFallbackPlan, recordTelemetry = true }) {
+export async function handleNonStreamingResponse({ providerResponse, provider, model, sourceFormat, targetFormat, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, reqLogger, toolNameMap, customToolNames, trackDone, appendLog, pxpipe, reqTag, log, webSearchFallbackPlan, webFetchFallbackPlan, recordTelemetry = true }) {
   trackDone();
   const contentType = providerResponse.headers.get("content-type") || "";
   let responseBody;
@@ -287,6 +288,9 @@ export async function handleNonStreamingResponse({ providerResponse, provider, m
   // tool, run the search here and rewrite the client-facing response in place.
   if (webSearchFallbackPlan?.enabled) {
     translatedResponse = await applyWebSearchFallback({ translatedResponse, sourceFormat, fallbackPlan: webSearchFallbackPlan, log });
+  }
+  if (webFetchFallbackPlan?.enabled) {
+    translatedResponse = await applyWebFetchFallback({ translatedResponse, sourceFormat, fallbackPlan: webFetchFallbackPlan, apiKey, log });
   }
   const isClaudeMessageResponse = sourceFormat === FORMATS.CLAUDE && translatedResponse?.type === "message";
   // Responses-format translation produces a `object:"response"` body with no

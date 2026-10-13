@@ -15,7 +15,7 @@ import { handleSearchCore } from "../../handlers/search/index.js";
 import { FORMATS } from "../../translator/formats.js";
 import { CLAUDE_BLOCK, RESPONSES_ITEM, CLAUDE_STOP } from "../../translator/schema/index.js";
 
-function toRecord(value) {
+export function toRecord(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
@@ -164,7 +164,7 @@ async function executeWebSearch(args, log) {
   return runSingleSearch(providerInput, args, log);
 }
 
-function extractHandledCalls(response, sourceFormat, toolName) {
+export function extractHandledCalls(response, sourceFormat, toolName) {
   const calls = [];
   if (sourceFormat === FORMATS.CLAUDE) {
     for (const block of Array.isArray(response.content) ? response.content : []) {
@@ -237,10 +237,10 @@ function withSearchUsage(usage, count, toolKey, requestKey) {
   };
 }
 
-function rewriteClaude(response, toolName, handled, outcomes) {
-  const blocksById = new Map(
-    handled.map((call, i) => [call.id, searchBlocks(toolName, call, outcomes[i])]),
-  );
+// Shared by the web_fetch interceptor: splice per-call server blocks in place of each
+// handled tool_use, ahead of any remaining client tool_use, and bump the usage counter.
+export function rewriteClaudeBlocks(response, handled, blocksFor, requestKey) {
+  const blocksById = new Map(handled.map((call, i) => [call.id, blocksFor(call, i)]));
   const content = [];
   const insertedIds = new Set();
   const insertAll = () => {
@@ -267,9 +267,13 @@ function rewriteClaude(response, toolName, handled, outcomes) {
   return {
     ...response,
     content,
-    usage: withSearchUsage(response.usage, handled.length, "server_tool_use", "web_search_requests"),
+    usage: withSearchUsage(response.usage, handled.length, "server_tool_use", requestKey),
     ...(hasRemainingToolUse ? {} : { stop_reason: CLAUDE_STOP.END_TURN, stop_sequence: null }),
   };
+}
+
+function rewriteClaude(response, toolName, handled, outcomes) {
+  return rewriteClaudeBlocks(response, handled, (call, i) => searchBlocks(toolName, call, outcomes[i]), "web_search_requests");
 }
 
 function rewriteResponses(response, handled, outcomes) {

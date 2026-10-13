@@ -34,6 +34,22 @@ describe("normalizeClaudePassthrough — foreign server_tool_use ids", () => {
     expect(out.messages[1].content).toEqual([{ type: "text", text: "keep me" }]);
   });
 
+  it("drops an orphaned web_fetch_tool_result when its foreign server_tool_use goes", () => {
+    const out = normalizeClaudePassthrough({
+      messages: [
+        glmServerToolUse(),
+        {
+          role: "user",
+          content: [
+            { type: "web_fetch_tool_result", tool_use_id: "call_50b82aba1b754d82a4408a53", content: { type: "web_fetch_result", url: "https://example.com" } },
+            { type: "text", text: "keep me" },
+          ],
+        },
+      ],
+    });
+    expect(out.messages[1].content).toEqual([{ type: "text", text: "keep me" }]);
+  });
+
   it("keeps a well-formed Anthropic server_tool_use block", () => {
     const block = { type: "server_tool_use", id: "srvtoolu_01EUi6RNgHntbStfCjgLyLzz", name: "web_search", input: {} };
     const out = normalizeClaudePassthrough({ messages: [{ role: "assistant", content: [block] }] });

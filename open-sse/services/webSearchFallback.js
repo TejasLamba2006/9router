@@ -211,3 +211,140 @@ export function prepareWebSearchFallbackBody(body, options) {
     },
   };
 }
+
+// ---- Native web_fetch redirect (layer 1) ----
+// Same shape as the web_search conversion above: Claude `web_fetch_*` server tools are
+// swapped for a plain `url` function tool that 9router executes through /v1/web/fetch.
+export const NINEROUTER_WEB_FETCH_FALLBACK_TOOL_NAME = "9router_web_fetch";
+const WEB_FETCH_TOOL_TYPES = /^web_fetch/;
+const URL_PATTERN = /https?:\/\/[^\s<>"'`)\]}]+/gi;
+
+function isBuiltInWebFetchTool(tool) {
+  const rec = toRecord(tool);
+  return typeof rec.type === "string" && WEB_FETCH_TOOL_TYPES.test(rec.type) && !rec.function;
+}
+
+// Strip fragment and trailing sentence punctuation so "see https://a.com/x." matches.
+export function normalizeFetchUrl(raw) {
+  try {
+    const url = new URL(String(raw).replace(/[.,;:!?]+$/, ""));
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function collectUrls(value, into) {
+  if (typeof value === "string") {
+    for (const m of value.match(URL_PATTERN) || []) {
+      const n = normalizeFetchUrl(m);
+      if (n) into.add(n);
+    }
+  } else if (Array.isArray(value)) {
+    for (const v of value) collectUrls(v, into);
+  } else if (value && typeof value === "object") {
+    for (const v of Object.values(value)) collectUrls(v, into);
+  }
+}
+
+// Anthropic only lets web_fetch use URLs that already appeared in the conversation:
+// user messages, client tool results, and prior search/fetch results. Assistant text and
+// the system prompt are deliberately excluded so the model cannot mint its own URLs.
+function collectPriorUrls(messages) {
+  const urls = new Set();
+  for (const msg of Array.isArray(messages) ? messages : []) {
+    if (msg?.role === "user") {
+      if (typeof msg.content === "string") collectUrls(msg.content, urls);
+      for (const block of Array.isArray(msg.content) ? msg.content : []) {
+        if (block?.type === "text") collectUrls(block.text, urls);
+        else if (block?.type === "tool_result") collectUrls(block.content, urls);
+      }
+    } else if (Array.isArray(msg?.content)) {
+      for (const block of msg.content) {
+        if (block?.type === "web_search_tool_result" || block?.type === "web_fetch_tool_result") {
+          collectUrls(block.content, urls);
+        }
+      }
+    }
+  }
+  return [...urls];
+}
+
+function stringList(v) {
+  return Array.isArray(v) ? v.filter((d) => typeof d === "string" && d.trim()).map((d) => d.trim().toLowerCase()) : null;
+}
+
+function webFetchPolicy(tool) {
+  const t = toRecord(tool);
+  const allowed = stringList(t.allowed_domains);
+  const blocked = stringList(t.blocked_domains);
+  return {
+    maxUses: Number.isInteger(t.max_uses) && t.max_uses > 0 ? t.max_uses : null,
+    allowedDomains: allowed?.length ? allowed : null,
+    blockedDomains: blocked?.length ? blocked : null,
+    maxContentTokens: Number.isInteger(t.max_content_tokens) && t.max_content_tokens > 0 ? t.max_content_tokens : null,
+    citations: toRecord(t.citations).enabled === true,
+  };
+}
+
+function buildWebFetchTool() {
+  return {
+    name: NINEROUTER_WEB_FETCH_FALLBACK_TOOL_NAME,
+    description: [
+      "Fetch the full content of a web page or PDF at a URL.",
+      "Only URLs the user provided, or that appeared in earlier tool or search results, can be fetched.",
+    ].join(" "),
+    input_schema: {
+      type: "object",
+      additionalProperties: false,
+      properties: { url: { type: "string", description: "The exact URL to fetch (http or https)." } },
+      required: ["url"],
+    },
+  };
+}
+
+// Claude -> Claude upstreams that actually run web_fetch natively keep the server tool.
+export function supportsNativeWebFetchFallbackBypass({ provider, sourceFormat, targetFormat, nativePassthrough }) {
+  if (nativePassthrough) return true;
+  if (sourceFormat === FORMATS.CLAUDE && targetFormat === FORMATS.CLAUDE) {
+    if (provider === "anthropic" || (provider || "").startsWith("anthropic-compatible")) return true;
+    const supported = PROVIDERS[provider]?.quirks?.claudeSupportedToolTypes;
+    return Array.isArray(supported) && supported.some((t) => WEB_FETCH_TOOL_TYPES.test(String(t)));
+  }
+  return false;
+}
+
+// Returns { body, fallback: { enabled, toolName, convertedToolCount, policy, priorUrls } }.
+export function prepareWebFetchFallbackBody(body, options) {
+  const disabled = { enabled: false, toolName: null, convertedToolCount: 0 };
+  if (options.sourceFormat !== FORMATS.CLAUDE) return { body, fallback: disabled };
+  const tools = Array.isArray(body?.tools) ? body.tools : null;
+  if (!tools?.length) return { body, fallback: disabled };
+  const builtIn = tools.filter(isBuiltInWebFetchTool);
+  if (builtIn.length === 0) return { body, fallback: disabled };
+  if (supportsNativeWebFetchFallbackBypass(options)) return { body, fallback: disabled };
+
+  // Client already owns the reserved name: converting would run its own tool as a fetch.
+  if (tools.some((t) => !isBuiltInWebFetchTool(t) && toRecord(t).name === NINEROUTER_WEB_FETCH_FALLBACK_TOOL_NAME)) {
+    return { body, fallback: disabled };
+  }
+
+  const nextBody = { ...body, tools: [buildWebFetchTool(), ...tools.filter((t) => !isBuiltInWebFetchTool(t))] };
+  const choice = toRecord(body.tool_choice);
+  if (WEB_FETCH_TOOL_TYPES.test(String(choice.type || "")) || (choice.type === "tool" && choice.name === "web_fetch" && builtIn.length > 0)) {
+    nextBody.tool_choice = { type: "tool", name: NINEROUTER_WEB_FETCH_FALLBACK_TOOL_NAME };
+  }
+
+  return {
+    body: nextBody,
+    fallback: {
+      enabled: true,
+      toolName: NINEROUTER_WEB_FETCH_FALLBACK_TOOL_NAME,
+      convertedToolCount: builtIn.length,
+      policy: webFetchPolicy(builtIn[0]),
+      priorUrls: collectPriorUrls(body.messages),
+    },
+  };
+}

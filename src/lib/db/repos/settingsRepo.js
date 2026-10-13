@@ -65,6 +65,7 @@ const DEFAULT_SETTINGS = {
   claudeClassifierCompat: "off",
   webSearchRouteModel: "",
   webSearchFallbackProvider: "",
+  webFetchFallbackProvider: "",
   // Per-provider user header overrides applied at dispatch: { [providerId]: { headers: {..} } }
   providerOverrides: {},
 };

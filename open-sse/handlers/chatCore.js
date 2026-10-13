@@ -27,7 +27,7 @@ import { handleForcedSSEToJson } from "./chatCore/sseToJsonHandler.js";
 import { handleNonStreamingResponse } from "./chatCore/nonStreamingHandler.js";
 import { handleStreamingResponse, buildOnStreamComplete } from "./chatCore/streamingHandler.js";
 import { detectClientTool, isNativePassthrough } from "../utils/clientDetector.js";
-import { prepareWebSearchFallbackBody } from "../services/webSearchFallback.js";
+import { prepareWebSearchFallbackBody, prepareWebFetchFallbackBody } from "../services/webSearchFallback.js";
 import { dedupeTools } from "../utils/toolDeduper.js";
 import { takeRenamedToolNames } from "../utils/opencodeFingerprint.js";
 import { injectCaveman } from "../rtk/caveman.js";
@@ -216,6 +216,20 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     body = bodyWithFallback;
     stream = false;
     log?.debug?.("WEBSEARCH", `Converted ${webSearchFallbackPlan.convertedToolCount} web_search tool(s) to fallback for ${provider}`);
+  }
+
+  // Native web_fetch redirect (layer 1): same idea, applied after search so a request that
+  // carries both server tools keeps both replacements.
+  const { body: bodyWithFetchFallback, fallback: webFetchFallbackPlan } = prepareWebFetchFallbackBody(body, {
+    provider,
+    sourceFormat,
+    targetFormat,
+    nativePassthrough: passthrough,
+  });
+  if (webFetchFallbackPlan.enabled) {
+    body = bodyWithFetchFallback;
+    stream = false;
+    log?.debug?.("WEBFETCH", `Converted ${webFetchFallbackPlan.convertedToolCount} web_fetch tool(s) to fallback for ${provider}`);
   }
 
   // Expose raw client headers to translators/executors for session-id resolution
@@ -561,7 +575,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     return createErrorResult(statusCode, errMsg, resetsAtMs, upstreamResponseHeaders(providerResponse.headers));
   }
 
-  const sharedCtx = { provider, model, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, pxpipe: pxpipeSummary, reqTag, log, webSearchFallbackPlan, recordTelemetry };
+  const sharedCtx = { provider, model, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, pxpipe: pxpipeSummary, reqTag, log, webSearchFallbackPlan, webFetchFallbackPlan, recordTelemetry };
   const appendLog = recordTelemetry
     ? (extra) => appendRequestLog({ model, provider, connectionId, ...extra }).catch(() => { })
     : () => {};
