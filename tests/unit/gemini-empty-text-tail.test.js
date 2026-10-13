@@ -23,3 +23,27 @@ describe("normalizeGeminiContents empty-text turns", () => {
     expect(out.at(-1).parts[0].functionResponse).toBeDefined();
   });
 });
+
+describe("normalizeGeminiContents functionResponse ordering", () => {
+  it("moves text before functionResponse parts (Gemini rejects functionResponse followed by text)", () => {
+    const fr = { functionResponse: { name: "a", response: { r: 1 } } };
+    const out = normalizeGeminiContents([
+      { role: "user", parts: [{ text: "hi" }] },
+      { role: "model", parts: [{ functionCall: { name: "a", args: {} } }] },
+      { role: "user", parts: [fr, { text: "<system-reminder>x</system-reminder>" }] },
+    ]);
+    const last = out.at(-1).parts;
+    expect(last[0].text).toBeDefined();
+    expect(last.at(-1).functionResponse).toBeDefined();
+  });
+
+  it("keeps multiple functionResponse parts in their original order", () => {
+    const f = (n) => ({ functionResponse: { name: n, response: {} } });
+    const out = normalizeGeminiContents([
+      { role: "user", parts: [{ text: "hi" }] },
+      { role: "model", parts: [{ functionCall: { name: "a", args: {} } }, { functionCall: { name: "b", args: {} } }] },
+      { role: "user", parts: [f("a"), { text: "t" }, f("b")] },
+    ]);
+    expect(out.at(-1).parts.map((p) => p.text ?? p.functionResponse.name)).toEqual(["t", "a", "b"]);
+  });
+});

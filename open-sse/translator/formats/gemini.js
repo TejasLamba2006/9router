@@ -486,6 +486,14 @@ export function normalizeGeminiContents(contents) {
     if (last?.role === c.role) last.parts.push(...parts);
     else out.push({ ...c, parts: [...parts] });
   }
+  // Gemini rejects a user turn where text follows functionResponse parts ("ending with a
+  // model turn" 400), e.g. a tool result followed by a <system-reminder> block. Put the
+  // text first; Array.sort is stable so functionResponse order is preserved.
+  for (const c of out) {
+    if (c.role === "user" && c.parts.some(p => p.functionResponse)) {
+      c.parts.sort((a, b) => !!a.functionResponse - !!b.functionResponse);
+    }
+  }
   if (out.length > 0 && out[0].role !== "user") {
     out.unshift({ role: "user", parts: [{ text: "..." }] });
   }
