@@ -166,7 +166,8 @@ export function translateNonStreamingResponse(responseBody, targetFormat, source
         result.usage.completion_tokens_details = { reasoning_tokens: usage.thoughtsTokenCount };
       }
     }
-    return result;
+    // A /v1/messages client needs an Anthropic message, not a chat.completion.
+    return sourceFormat === FORMATS.CLAUDE ? openAICompletionToClaudeMessage(result) : result;
   }
 
   // Claude
