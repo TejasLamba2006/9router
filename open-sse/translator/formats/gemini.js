@@ -476,7 +476,11 @@ export function normalizeGeminiContents(contents) {
   const out = [];
   for (const c of contents || []) {
     if (!c?.role || !Array.isArray(c.parts)) continue;
-    const parts = c.parts.filter(p => p && Object.keys(p).length > 0).map(sanitizeFunctionResponsePart);
+    // A bare {text:""} part is not an empty object but Gemini counts the turn as empty,
+    // so a blank trailing user turn leaves the history ending on a model turn (400).
+    const parts = c.parts
+      .filter(p => p && Object.keys(p).length > 0 && !(p.text === "" && Object.keys(p).length === 1))
+      .map(sanitizeFunctionResponsePart);
     if (parts.length === 0) continue;
     const last = out.at(-1);
     if (last?.role === c.role) last.parts.push(...parts);
