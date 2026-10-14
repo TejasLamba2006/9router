@@ -9,7 +9,7 @@ import { HTTP_STATUS } from "../../config/runtimeConfig.js";
 import { parseSSEToOpenAIResponse } from "./sseToJsonHandler.js";
 import { unwrapClineEnvelope } from "../../shared/clineEnvelope.js";
 import { buildRequestDetail, extractRequestConfig, extractUsageFromResponse, saveUsageStats, formatDoneLine } from "./requestDetail.js";
-import { appendRequestLog, saveRequestDetail } from "@/lib/usageDb.js";
+import { appendRequestLog, saveRequestDetail, emitRequestError } from "@/lib/usageDb.js";
 import { decloakToolNames } from "../../utils/claudeCloaking.js";
 import { restoreToolNames } from "../../utils/opencodeFingerprint.js";
 import { ROLE, RESPONSES_ITEM } from "../../translator/schema/index.js";
@@ -247,6 +247,7 @@ export async function handleNonStreamingResponse({ providerResponse, provider, m
     const parsed = parseSSEToOpenAIResponse(sseText, model);
     if (!parsed) {
       appendLog({ status: `FAILED ${HTTP_STATUS.BAD_GATEWAY}` });
+      if (recordTelemetry) emitRequestError({ provider, model, status: HTTP_STATUS.BAD_GATEWAY, message: "Invalid SSE response for non-streaming request" });
       return createErrorResult(HTTP_STATUS.BAD_GATEWAY, "Invalid SSE response for non-streaming request");
     }
     responseBody = parsed;
@@ -256,6 +257,7 @@ export async function handleNonStreamingResponse({ providerResponse, provider, m
     } catch (err) {
       appendLog({ status: `FAILED ${HTTP_STATUS.BAD_GATEWAY}` });
       console.error(`[ChatCore] Failed to parse JSON from ${provider}:`, err.message);
+      if (recordTelemetry) emitRequestError({ provider, model, status: HTTP_STATUS.BAD_GATEWAY, message: `Invalid JSON response from ${provider}` });
       return createErrorResult(HTTP_STATUS.BAD_GATEWAY, `Invalid JSON response from ${provider}`);
     }
   }

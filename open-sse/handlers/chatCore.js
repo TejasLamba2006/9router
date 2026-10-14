@@ -19,7 +19,7 @@ import {
   detectClassifierFormat,
   buildDefaultAllowClaudeMessage,
 } from "./chatCore/claudeClassifierCompat.js";
-import { trackPendingRequest, appendRequestLog, saveRequestDetail } from "@/lib/usageDb.js";
+import { trackPendingRequest, appendRequestLog, saveRequestDetail, emitRequestError } from "@/lib/usageDb.js";
 import { getExecutor } from "../executors/index.js";
 import { supportsGrokCliReasoningEffort } from "../config/grokCli.js";
 import { buildRequestDetail, extractRequestConfig } from "./chatCore/requestDetail.js";
@@ -271,7 +271,10 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   } else {
     translatedBody = translateRequest(sourceFormat, targetFormat, upstreamModel, body, stream, credentials, provider, reqLogger, stripList, connectionId, clientTool);
     if (!translatedBody) {
-      if (recordTelemetry) trackPendingRequest(model, provider, connectionId, false, true);
+      if (recordTelemetry) {
+        trackPendingRequest(model, provider, connectionId, false, true);
+        emitRequestError({ provider, model, status: HTTP_STATUS.BAD_REQUEST, message: `Failed to translate request for ${sourceFormat} → ${targetFormat}` });
+      }
       return createErrorResult(HTTP_STATUS.BAD_REQUEST, `Failed to translate request for ${sourceFormat} → ${targetFormat}`);
     }
     toolNameMap = translatedBody._toolNameMap;
@@ -477,6 +480,10 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     if (recordTelemetry) {
       trackPendingRequest(model, provider, connectionId, false, true);
       appendRequestLog({ model, provider, connectionId, status: `FAILED ${error.name === "AbortError" ? 499 : HTTP_STATUS.BAD_GATEWAY}` }).catch(() => { });
+      // A client abort (499) is the user's own cancel, not a provider failure worth a toast.
+      if (error.name !== "AbortError") {
+        emitRequestError({ provider, model, status: HTTP_STATUS.BAD_GATEWAY, message: formatProviderError(error, provider, model, HTTP_STATUS.BAD_GATEWAY) });
+      }
       saveRequestDetail(buildRequestDetail({
         provider, model, connectionId,
         latency: { ttft: 0, total: Date.now() - requestStartTime },
@@ -554,6 +561,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     if (recordTelemetry) {
       trackPendingRequest(model, provider, connectionId, false, true);
       appendRequestLog({ model, provider, connectionId, status: `FAILED ${statusCode}` }).catch(() => { });
+      emitRequestError({ provider, model, status: statusCode, message });
       saveRequestDetail(buildRequestDetail({
         provider, model, connectionId,
         latency: { ttft: 0, total: Date.now() - requestStartTime },

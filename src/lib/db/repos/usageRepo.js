@@ -174,6 +174,27 @@ async function ensureRingInitialized() {
   } catch {}
 }
 
+const REQUEST_ERROR_MAX_CHARS = 2000;
+let requestErrorSeq = 0;
+
+// One "requestError" event per failed upstream request, carrying the exact status and
+// provider text for the dashboard toast. Fail-open: telemetry must never break a request.
+export function emitRequestError(entry) {
+  try {
+    const status = entry?.status;
+    const message = entry?.message == null ? "" : String(entry.message);
+    if (!status && !message) return;
+    statsEmitter.emit("requestError", {
+      id: `${Date.now()}-${++requestErrorSeq}`,
+      ts: Date.now(),
+      provider: entry.provider || "",
+      model: entry.model || "",
+      status: status || null,
+      message: message.slice(0, REQUEST_ERROR_MAX_CHARS),
+    });
+  } catch { /* never block the request path */ }
+}
+
 export function trackPendingRequest(model, provider, connectionId, started, error = false) {
   const modelKey = provider ? `${model} (${provider})` : model;
   const timerKey = `${connectionId}|${modelKey}`;

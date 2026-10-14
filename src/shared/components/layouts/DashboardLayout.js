@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
 import { useNotificationStore } from "@/store/notificationStore";
+import { formatRequestErrorToast } from "@/shared/utils/requestErrorToast";
 import Sidebar from "../Sidebar";
 import Header from "../Header";
 
@@ -36,6 +37,19 @@ export default function DashboardLayout({ children }) {
   const pathname = usePathname();
   const notifications = useNotificationStore((state) => state.notifications);
   const removeNotification = useNotificationStore((state) => state.removeNotification);
+
+  // Toast every failed upstream request with the exact status and provider text.
+  useEffect(() => {
+    if (typeof EventSource === "undefined") return undefined;
+    const es = new EventSource("/api/usage/errors");
+    es.onmessage = (e) => {
+      try {
+        const { title, message } = formatRequestErrorToast(JSON.parse(e.data));
+        useNotificationStore.getState().addNotification({ type: "error", title, message, duration: 12000 });
+      } catch { /* ignore malformed events */ }
+    };
+    return () => es.close();
+  }, []);
 
   // Preload heavy usage charts in background when browser is idle
   useEffect(() => {
