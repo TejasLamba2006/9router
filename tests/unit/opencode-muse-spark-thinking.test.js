@@ -218,7 +218,7 @@ describe("OpenCode Free Muse Spark thinking", () => {
     expect(out.tools).toEqual([
       {
         type: "function",
-        name: "shell",
+        name: "shell_client",
         description: "Run shell command",
         parameters: { type: "object", properties: {} },
       },
@@ -235,6 +235,18 @@ describe("OpenCode Free Muse Spark thinking", () => {
             },
           },
           required: ["path"],
+        },
+      },
+      {
+        type: "function",
+        name: "shell",
+        description: expect.stringMatching(/^Execute a shell command and return its output/),
+        parameters: {
+          type: "object",
+          properties: {
+            command: { type: "string", description: "Shell command string to execute" },
+          },
+          required: ["command"],
         },
       },
     ]);

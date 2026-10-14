@@ -55,9 +55,12 @@ function toolNameOf(tool) {
 }
 
 /**
- * Canonicalise only the fingerprint quartet and remove duplicate quartet
- * variants. Non-fingerprint tools are preserved verbatim, including tools whose
- * names differ only by case; they are outside OpenCode's fingerprint contract.
+ * Zen answers 200 only when the exact canonical `read` and `shell` declarations are
+ * present (name, description and schema). Client tools are therefore never rewritten
+ * into those names: they stay verbatim and the canonical pair is appended next to them.
+ * The one exception is a client tool already named exactly `read` or `shell`; it would
+ * duplicate the canonical declaration (403), so it is renamed `<name>_client` and the
+ * response side maps the name back.
  *
  * @param {Array} tools
  * @returns {{ tools: Array, map: Map<string,string> }} map: sent name -> original name
@@ -66,36 +69,17 @@ export function concealFingerprintToolNames(tools) {
   const map = new Map();
   if (!Array.isArray(tools) || tools.length === 0) return { tools, map };
 
-  const seenQuartet = new Set();
-  const out = [];
-  for (const tool of tools) {
-    if (!tool || typeof tool !== "object" || Array.isArray(tool)) {
-      out.push(tool);
-      continue;
-    }
-
+  const out = tools.map((tool) => {
+    if (!tool || typeof tool !== "object" || Array.isArray(tool)) return tool;
     const current = toolNameOf(tool);
-    const key = fingerprintToolKey(current);
-    if (!key) {
-      out.push(tool);
-      continue;
-    }
-
-    // `Bash` + `bash` is rejected upstream as a duplicate. Keep exactly one
-    // declaration for each quartet member.
-    if (seenQuartet.has(key)) continue;
-    seenQuartet.add(key);
-
-    if (current !== key) {
-      map.set(key, current);
-      const fn = tool.function && typeof tool.function === "object" && !Array.isArray(tool.function)
-        ? tool.function
-        : null;
-      out.push(fn ? { ...tool, function: { ...fn, name: key } } : { ...tool, name: key });
-    } else {
-      out.push(tool);
-    }
-  }
+    if (!OPENCODE_FINGERPRINT_TOOLS.includes(current)) return tool;
+    const renamed = `${current}_client`;
+    map.set(renamed, current);
+    const fn = tool.function && typeof tool.function === "object" && !Array.isArray(tool.function)
+      ? tool.function
+      : null;
+    return fn ? { ...tool, function: { ...fn, name: renamed } } : { ...tool, name: renamed };
+  });
   return { tools: out, map };
 }
 
@@ -103,7 +87,7 @@ export function concealFingerprintToolNames(tools) {
 export function appendMissingFingerprintTools(tools, flat) {
   const list = Array.isArray(tools) ? tools : [];
   for (const name of OPENCODE_FINGERPRINT_TOOLS) {
-    if (list.some((tool) => fingerprintToolKey(toolNameOf(tool)) === name)) continue;
+    if (list.some((tool) => toolNameOf(tool) === name)) continue;
     const def = OPENCODE_CANONICAL_TOOL_DEFINITIONS[name];
     list.push(flat ? {
       type: "function",
@@ -122,24 +106,22 @@ export function appendMissingFingerprintTools(tools, flat) {
   return list;
 }
 
-/** Point an explicit tool_choice at a quartet member after canonicalisation. */
+/** Point an explicit tool_choice at the client tool that was renamed out of the way. */
 export function retargetToolChoice(body, map) {
   if (!body || typeof body !== "object" || !map?.size) return;
   const choice = body.tool_choice;
   if (!choice || typeof choice !== "object" || Array.isArray(choice)) return;
+  const sentNameFor = (original) => [...map].find(([, orig]) => orig === original)?.[0];
 
   if (typeof choice.name === "string") {
-    const key = fingerprintToolKey(choice.name);
-    if (key && map.has(key)) body.tool_choice = { ...choice, name: key };
+    const sent = sentNameFor(choice.name);
+    if (sent) body.tool_choice = { ...choice, name: sent };
     return;
   }
-
   const fn = choice.function;
   if (fn && typeof fn === "object" && !Array.isArray(fn) && typeof fn.name === "string") {
-    const key = fingerprintToolKey(fn.name);
-    if (key && map.has(key)) {
-      body.tool_choice = { ...choice, function: { ...fn, name: key } };
-    }
+    const sent = sentNameFor(fn.name);
+    if (sent) body.tool_choice = { ...choice, function: { ...fn, name: sent } };
   }
 }
 

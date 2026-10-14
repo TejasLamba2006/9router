@@ -14,45 +14,47 @@ const flat = (names) => names.map((name) => ({ type: "function", name }));
 const chat = (names) => names.map((name) => ({ type: "function", function: { name } }));
 
 describe("opencodeFingerprint — request side", () => {
-  it("renames capitalised fingerprint members to lowercase", () => {
+  // Zen answers 200 only for the exact canonical read+shell declarations (verified live):
+  // client-style tools with the same names get 403, so client tools are never rewritten
+  // into them and the canonical pair is appended beside the client's own tools.
+  it("keeps client tools verbatim and appends the canonical read and shell", () => {
     const body = { tools: flat(CC_TOOLS) };
     const map = applyFingerprintTools(body, true);
     const names = body.tools.map((tool) => tool.name);
 
-    expect(names).toContain("shell");
-    expect(names).not.toContain("Shell");
-    expect(names).toContain("Edit");
-    expect(map.get("shell")).toBe("Shell");
+    expect(names.slice(0, CC_TOOLS.length)).toEqual(CC_TOOLS);
+    expect(names.slice(CC_TOOLS.length)).toEqual(["read", "shell"]);
+    expect(map.size).toBe(0);
   });
 
-  it("removes fingerprint case duplicates without dropping unrelated case variants", () => {
-    const body = { tools: flat(["Shell", "shell", "Read", "read", "Foo", "foo"]) };
+  it("appends the canonical definitions with their real descriptions and schemas", () => {
+    const body = { tools: flat(["Edit"]) };
     applyFingerprintTools(body, true);
+    const shell = body.tools.find((tool) => tool.name === "shell");
+    expect(shell.description).toMatch(/^Execute a shell command and return its output/);
+    expect(shell.parameters.required).toEqual(["command"]);
+  });
 
+  it("renames a client tool that is already exactly read or shell, and maps it back", () => {
+    const body = { tools: flat(["read", "shell", "Edit"]), tool_choice: { type: "function", name: "shell" } };
+    const map = applyFingerprintTools(body, true);
     const names = body.tools.map((tool) => tool.name);
-    expect(names.filter((name) => name === "shell")).toHaveLength(1);
-    expect(names.filter((name) => name === "read")).toHaveLength(1);
-    expect(names).toContain("Foo");
-    expect(names).toContain("foo");
+
+    expect(names).toEqual(["read_client", "shell_client", "Edit", "read", "shell"]);
+    expect(map.get("read_client")).toBe("read");
+    expect(map.get("shell_client")).toBe("shell");
+    expect(body.tool_choice.name).toBe("shell_client");
   });
 
-  it("preserves tool count when a complete quartet is only renamed", () => {
-    const body = { tools: flat(CC_TOOLS) };
-    applyFingerprintTools(body, true);
-    expect(body.tools).toHaveLength(CC_TOOLS.length);
-  });
-
-  it("handles the nested chat shape without dropping .function", () => {
-    const body = { tools: chat(CC_TOOLS) };
+  it("handles the nested chat shape", () => {
+    const body = { tools: chat(["read", "Edit"]), tool_choice: { type: "function", function: { name: "read" } } };
     applyFingerprintTools(body, false);
 
-    const names = body.tools.map((tool) => tool.function.name);
-    expect(names).toContain("shell");
-    expect(names).not.toContain("Shell");
-    expect(body.tools[1].function.name).toBe("shell");
+    expect(body.tools.map((tool) => tool.function.name)).toEqual(["read_client", "Edit", "read", "shell"]);
+    expect(body.tool_choice.function.name).toBe("read_client");
   });
 
-  it("injects all four fingerprint tools when the body carries no tools", () => {
+  it("injects the canonical pair when the body carries no tools", () => {
     const body = { tools: [] };
     applyFingerprintTools(body, true);
 
@@ -74,34 +76,8 @@ describe("opencodeFingerprint — request side", () => {
     expect(body.tool_choice).toBeUndefined();
   });
 
-  it("appends only genuinely missing fingerprint members", () => {
-    const body = { tools: flat(["Shell", "Read", "terminal"]) };
-    applyFingerprintTools(body, true);
-
-    const names = body.tools.map((tool) => tool.name);
-    expect(names).toContain("shell");
-    expect(names).toContain("read");
-    expect(names).toContain("terminal");
-    expect(body.tools).toHaveLength(3);
-  });
-
-  it("retargets flat tool_choice that points at a renamed tool", () => {
-    const body = { tools: flat(CC_TOOLS), tool_choice: { type: "function", name: "Shell" } };
-    applyFingerprintTools(body, true);
-    expect(body.tool_choice.name).toBe("shell");
-  });
-
-  it("retargets nested tool_choice that points at a renamed tool", () => {
-    const body = {
-      tools: chat(CC_TOOLS),
-      tool_choice: { type: "function", function: { name: "Read" } },
-    };
-    applyFingerprintTools(body, false);
-    expect(body.tool_choice.function.name).toBe("read");
-  });
-
   it("records the rename map against the body for the response side", () => {
-    const body = { tools: flat(CC_TOOLS) };
+    const body = { tools: flat(["read"]) };
     const map = applyFingerprintTools(body, true);
     expect(takeRenamedToolNames(body)).toBe(map);
   });

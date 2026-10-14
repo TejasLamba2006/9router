@@ -298,9 +298,11 @@ describe("OpenCode Stable Session Reuse (429 follow-up)", () => {
       tool_choice: "auto",
     });
     expect(chatWithTools.tool_choice).toBe("auto");
+    // Client tools stay verbatim; Zen only accepts the exact canonical pair next to them.
     expect(chatWithTools.tools.map((t) => t.function?.name)).toEqual([
-      "read", "shell",
+      "Read", "Shell", "read", "shell",
     ]);
+    expect(chatWithTools.tools[0].function.description).toBe("Claude Code tool");
 
     const chatPartial = executor.transformRequest("nemotron-3-ultra-free", {
       messages: [{ role: "user", content: "hi" }],
@@ -308,10 +310,13 @@ describe("OpenCode Stable Session Reuse (429 follow-up)", () => {
         { type: "function", function: { name: "read", description: "existing" } },
       ],
     });
+    // A client tool named exactly `read` would duplicate the canonical one (403), so it is
+    // renamed out of the way and mapped back on the response.
     expect(chatPartial.tools.map((t) => t.function?.name)).toEqual([
-      "read", "shell",
+      "read_client", "read", "shell",
     ]);
     expect(chatPartial.tools[0].function.description).toBe("existing");
+    expect(chatPartial.tools[1].function.description).toMatch(/^Read the contents of a file/);
   });
 
   it("cloaks Muse Responses requests even when the client already supplies tools", () => {
