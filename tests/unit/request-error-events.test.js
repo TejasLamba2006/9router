@@ -73,3 +73,38 @@ describe("formatRequestErrorToast", () => {
     expect(formatRequestErrorToast({ status: 502, provider: "p", model: "m" }).message).toBe("No error body returned by the provider");
   });
 });
+
+describe("pollRequestErrors", () => {
+  const mkFetch = (pages) => {
+    const urls = [];
+    const impl = async (url) => {
+      urls.push(url);
+      const page = pages.shift() || { events: [], now: 0 };
+      return { ok: true, json: async () => page };
+    };
+    return { impl, urls };
+  };
+  const ev = (id, status = 403) => ({ id, ts: 1, provider: "p", model: "m", status, message: `m-${id}` });
+
+  it("delivers each event once and advances the cursor from the server clock", async () => {
+    const { pollRequestErrors } = await import("../../src/shared/utils/requestErrorToast.js");
+    const got = [];
+    const state = { since: 0, seen: new Set() };
+    const { impl, urls } = mkFetch([
+      { events: [ev("a"), ev("b", 404)], now: 10_000 },
+      { events: [ev("b", 404), ev("c", 409)], now: 20_000 },
+    ]);
+    await pollRequestErrors(state, (e) => got.push(e.id), impl);
+    await pollRequestErrors(state, (e) => got.push(e.id), impl);
+    expect(got).toEqual(["a", "b", "c"]);
+    expect(urls[0]).toContain("since=0");
+    expect(urls[1]).toContain("since=9000");
+  });
+
+  it("ignores a failed poll without moving the cursor", async () => {
+    const { pollRequestErrors } = await import("../../src/shared/utils/requestErrorToast.js");
+    const state = { since: 5, seen: new Set() };
+    await pollRequestErrors(state, () => { throw new Error("must not fire"); }, async () => ({ ok: false }));
+    expect(state.since).toBe(5);
+  });
+});

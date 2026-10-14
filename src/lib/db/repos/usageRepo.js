@@ -175,7 +175,16 @@ async function ensureRingInitialized() {
 }
 
 const REQUEST_ERROR_MAX_CHARS = 2000;
+const REQUEST_ERROR_BUFFER = 50;
+if (!global._requestErrorBuffer) global._requestErrorBuffer = [];
+const requestErrorBuffer = global._requestErrorBuffer;
 let requestErrorSeq = 0;
+
+// Recent failures, oldest first, newer than `since` (ms epoch). The dashboard polls this.
+export function getRequestErrors(since = 0) {
+  const cutoff = Number.isFinite(Number(since)) ? Number(since) : 0;
+  return requestErrorBuffer.filter((e) => e.ts > cutoff);
+}
 
 // One "requestError" event per failed upstream request, carrying the exact status and
 // provider text for the dashboard toast. Fail-open: telemetry must never break a request.
@@ -184,14 +193,17 @@ export function emitRequestError(entry) {
     const status = entry?.status;
     const message = entry?.message == null ? "" : String(entry.message);
     if (!status && !message) return;
-    statsEmitter.emit("requestError", {
+    const event = {
       id: `${Date.now()}-${++requestErrorSeq}`,
       ts: Date.now(),
       provider: entry.provider || "",
       model: entry.model || "",
       status: status || null,
       message: message.slice(0, REQUEST_ERROR_MAX_CHARS),
-    });
+    };
+    requestErrorBuffer.push(event);
+    if (requestErrorBuffer.length > REQUEST_ERROR_BUFFER) requestErrorBuffer.shift();
+    statsEmitter.emit("requestError", event);
   } catch { /* never block the request path */ }
 }
 
