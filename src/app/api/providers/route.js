@@ -39,6 +39,10 @@ async function normalizeProxyPoolId(proxyPoolId) {
     return { proxyPoolId: null };
   }
 
+  if (normalizedId === "__rotate_random__" || normalizedId === "__rotate_rr__") {
+    return { proxyPoolId: normalizedId };
+  }
+
   const proxyPool = await getProxyPoolById(normalizedId);
   if (!proxyPool) {
     return { error: "Proxy pool not found" };

@@ -600,6 +600,57 @@ export default function ProxyPoolsPage() {
     [proxyPools]
   );
 
+  const localPool = useMemo(
+    () => proxyPools.find((pool) => pool.type === "local" || pool.id === "__local__") || null,
+    [proxyPools]
+  );
+
+  const handleToggleLocalPool = async () => {
+    setBulkBusy(true);
+    try {
+      if (localPool) {
+        const next = !localPool.isActive;
+        const res = await fetch(`/api/proxy-pools/${localPool.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ isActive: next }),
+        });
+        if (res.ok) {
+          await fetchProxyPools();
+          notify.success(next ? "This PC enabled in proxy pool" : "This PC disabled in proxy pool");
+        } else {
+          notify.error("Failed to update This PC pool");
+        }
+      } else {
+        const res = await fetch("/api/proxy-pools", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: "__local__",
+            name: "This PC (Direct)",
+            type: "local",
+            proxyUrl: "direct://local",
+            noProxy: "",
+            isActive: true,
+            strictProxy: false,
+            testStatus: "active",
+          }),
+        });
+        if (res.ok) {
+          await fetchProxyPools();
+          notify.success("This PC added to proxy pool");
+        } else {
+          notify.error("Failed to add This PC to proxy pool");
+        }
+      }
+    } catch (error) {
+      console.log("Error toggling local pool:", error);
+      notify.error("Failed to update This PC pool");
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 px-1 sm:gap-6 sm:px-0">
@@ -698,6 +749,17 @@ export default function ProxyPoolsPage() {
           )}
           <Badge variant="default">Total: {proxyPools.length}</Badge>
           <Badge variant="success">Active: {activeCount}</Badge>
+          <div className="ml-auto flex items-center gap-2 rounded-lg border border-black/10 dark:border-white/10 px-2.5 py-1">
+            <span className="material-symbols-outlined text-[16px] text-text-muted">computer</span>
+            <span className="text-xs font-medium text-text-main">Include This PC (Direct)</span>
+            <Toggle
+              size="sm"
+              checked={localPool?.isActive === true}
+              onChange={handleToggleLocalPool}
+              disabled={bulkBusy}
+              title="Add or toggle your local direct connection in the proxy pool so rotation can pick between your PC and custom proxies"
+            />
+          </div>
         </div>
 
         {(selectedIds.length > 0 || healthChecking) && (
@@ -774,6 +836,9 @@ export default function ProxyPoolsPage() {
                     )}
                     {pool.type === "netlify" && (
                       <Badge variant="default" size="sm">netlify relay</Badge>
+                    )}
+                    {pool.type === "local" && (
+                      <Badge variant="default" size="sm">this pc (direct)</Badge>
                     )}
                     <Badge variant="default" size="sm">
                       {pool.boundConnectionCount || 0} bound

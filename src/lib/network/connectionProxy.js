@@ -94,6 +94,21 @@ export async function resolveConnectionProxyConfig(
       const proxyUrl = normalizeString(proxyPool?.proxyUrl);
       const noProxy = normalizeString(proxyPool?.noProxy);
 
+      if (proxyPool && proxyPool.isActive === true && proxyPool.type === "local") {
+        return {
+          source: "local",
+
+          proxyPoolId,
+          proxyPool,
+
+          connectionProxyEnabled: false,
+          connectionProxyUrl: "",
+          connectionNoProxy: noProxy,
+
+          strictProxy: false,
+        };
+      }
+
       const isValidPool =
         proxyPool &&
         proxyPool.isActive === true &&

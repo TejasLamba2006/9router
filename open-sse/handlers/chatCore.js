@@ -40,6 +40,8 @@ import { stripUnsupportedModalities } from "../translator/concerns/modality.js";
 import { prefetchRemoteImages } from "../translator/concerns/prefetch.js";
 import { defaultClaudeToolType, shouldDefaultClaudeToolType } from "../translator/concerns/toolCall.js";
 import { resolveSessionId } from "../utils/sessionManager.js";
+import { isAnthropicThinkingSignatureError, stripHistoricalThinkingForSignatureRecovery } from "../utils/thinkingSignatureRecovery.js";
+import { probeStreamingResponseForEmptyTurn } from "../utils/emptyTurnRetry.js";
 
 /**
  * Core chat handler - shared between SSE and Worker
@@ -420,16 +422,21 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     connectionNoProxy: credentials?.providerSpecificData?.connectionNoProxy || "",
     strictProxy: credentials?.providerSpecificData?.strictProxy === true,
     vercelRelayUrl: credentials?.providerSpecificData?.vercelRelayUrl || "",
+    proxyType: credentials?.providerSpecificData?.connectionProxyType || "",
     // Strict pools must never silently fall back to a direct connection —
     // honored on the Cursor AgentService h2 path and in proxyFetch (#4333).
     proxyPoolId: credentials?.providerSpecificData?.connectionProxyPoolId || null,
-    strictProxy: credentials?.providerSpecificData?.strictProxy === true,
   };
 
   if (proxyOptions.vercelRelayUrl) {
     const connectionName = credentials?.connectionName || credentials?.connectionId || "unknown";
     const poolId = credentials?.providerSpecificData?.connectionProxyPoolId || "none";
-    log?.info?.("PROXY", `${provider.toUpperCase()} | ${model} | conn=${connectionName} | pool=${poolId} | vercel-relay=${proxyOptions.vercelRelayUrl}`);
+    const relayLabel = proxyOptions.proxyType ? `${proxyOptions.proxyType}-relay` : "relay";
+    log?.info?.("PROXY", `${provider.toUpperCase()} | ${model} | conn=${connectionName} | pool=${poolId} | ${relayLabel}=${proxyOptions.vercelRelayUrl}`);
+  } else if (proxyOptions.proxyType === "local") {
+    const connectionName = credentials?.connectionName || credentials?.connectionId || "unknown";
+    const poolId = credentials?.providerSpecificData?.connectionProxyPoolId || "local";
+    log?.info?.("PROXY", `${provider.toUpperCase()} | ${model} | conn=${connectionName} | pool=${poolId} | direct=this-pc`);
   } else if (proxyOptions.connectionProxyEnabled && proxyOptions.connectionProxyUrl) {
     let maskedProxyUrl = proxyOptions.connectionProxyUrl;
     try {
@@ -561,7 +568,47 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
 
   // Provider returned error
   if (!providerResponse.ok) {
-    const { statusCode, message, resetsAtMs } = await parseUpstreamError(providerResponse, executor);
+    let { statusCode, message, resetsAtMs } = await parseUpstreamError(providerResponse, executor);
+
+    // One-shot recovery for Anthropic 400 "Invalid signature in thinking block":
+    // strip historical thinking blocks outside the active tool_use/tool_result chain and retry once.
+    if (isAnthropicThinkingSignatureError({ provider, status: statusCode, message })) {
+      const recoveredBody = stripHistoricalThinkingForSignatureRecovery(translatedBody);
+      if (recoveredBody !== translatedBody) {
+        log?.warn?.("THINKING", `${provider.toUpperCase()} | ${model} | 400 invalid thinking signature — stripping historical thinking and retrying once`);
+        try {
+          const retryResult = await executor.execute({
+            model,
+            body: recoveredBody,
+            stream,
+            credentials,
+            providerSessionId: sessionSeed,
+            clientTool,
+            signal: streamController.signal,
+            log,
+            proxyOptions,
+            providerOverrides,
+          });
+          if (retryResult.response.ok) {
+            providerResponse = retryResult.response;
+            providerUrl = retryResult.url;
+            providerHeaders = retryResult.headers;
+            finalBody = retryResult.transformedBody;
+            providerResponseFormat = retryResult.responseFormat || targetFormat;
+            translatedBody = recoveredBody;
+          } else {
+            const parsed = await parseUpstreamError(retryResult.response, executor);
+            statusCode = parsed.statusCode;
+            message = parsed.message;
+            resetsAtMs = parsed.resetsAtMs;
+            providerResponse = retryResult.response;
+          }
+        } catch (retryErr) {
+          log?.warn?.("THINKING", `${provider.toUpperCase()} | thinking-signature recovery retry threw: ${retryErr?.message || retryErr}`);
+        }
+      }
+    }
+    if ( !providerResponse.ok ) {
     if (recordTelemetry) {
       trackPendingRequest(model, provider, connectionId, false, true);
       appendRequestLog({ model, provider, connectionId, status: `FAILED ${statusCode}` }).catch(() => { });
@@ -585,6 +632,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     }
     reqLogger.logError(new Error(message), finalBody || translatedBody);
     return createErrorResult(statusCode, errMsg, resetsAtMs, upstreamResponseHeaders(providerResponse.headers));
+    }
   }
 
   const sharedCtx = { provider, model, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, pxpipe: pxpipeSummary, reqTag, log, webSearchFallbackPlan, webFetchFallbackPlan, recordTelemetry };
@@ -611,7 +659,23 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     return result;
   }
 
-  // Streaming response
+  // Streaming response: probe the first usable chunk on a cloned stream so an
+  // upstream 200 SSE stream that closes with zero content/tool calls (or an inline
+  // error event) triggers account/combo fallback instead of streaming an empty turn.
+  const emptyProbe = await probeStreamingResponseForEmptyTurn(providerResponse);
+  if (emptyProbe.empty && !streamController.signal?.aborted) {
+    const emptyMsg = emptyProbe.reason || "Upstream returned empty streaming turn";
+    if (recordTelemetry) {
+      trackPendingRequest(model, provider, connectionId, false, true);
+      appendRequestLog({ model, provider, connectionId, status: "FAILED 502 (EMPTY TURN)" }).catch(() => { });
+      emitRequestError({ provider, model, status: HTTP_STATUS.BAD_GATEWAY, message: emptyMsg });
+    }
+    if (log?.errorLine) {
+      log.errorLine(reqTag, "✗", `EMPTY TURN 502 · ${provider}/${model} · ${Date.now() - requestStartTime}ms\n    ${emptyMsg}`);
+    }
+    return createErrorResult(HTTP_STATUS.BAD_GATEWAY, emptyMsg);
+  }
+
   const { onStreamComplete, streamDetailId } = buildOnStreamComplete({ ...sharedCtx });
   return handleStreamingResponse({ ...sharedCtx, providerResponse, sourceFormat, targetFormat: providerResponseFormat, userAgent, reqLogger, toolNameMap, customToolNames, streamController, onStreamComplete, streamDetailId, credentials });
 }

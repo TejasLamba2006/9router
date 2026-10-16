@@ -52,6 +52,10 @@ async function normalizeProxyPoolUpdate(proxyPoolIdInput) {
     return { hasProxyPoolField: true, proxyPoolId: null };
   }
 
+  if (proxyPoolId === "__rotate_random__" || proxyPoolId === "__rotate_rr__") {
+    return { hasProxyPoolField: true, proxyPoolId };
+  }
+
   const proxyPool = await getProxyPoolById(proxyPoolId);
   if (!proxyPool) {
     return { hasProxyPoolField: true, error: "Proxy pool not found" };

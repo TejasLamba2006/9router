@@ -447,11 +447,17 @@ export default function ProviderDetailPage() {
       const settingsData = settingsRes.ok ? await settingsRes.json() : {};
       const current = settingsData.providerStrategies || {};
 
-      // Build override: null strategy means remove override, use global
-      const override = {};
-      if (strategy) override.fallbackStrategy = strategy;
+      // Build override: preserve any existing proxy rotation keys on this provider
+      const override = { ...(current[providerId] || {}) };
+      if (strategy) {
+        override.fallbackStrategy = strategy;
+      } else {
+        delete override.fallbackStrategy;
+      }
       if (strategy === "round-robin" && stickyLimit !== "") {
         override.stickyRoundRobinLimit = Number(stickyLimit) || 3;
+      } else {
+        delete override.stickyRoundRobinLimit;
       }
 
       const updated = { ...current };
@@ -1100,12 +1106,28 @@ export default function ProviderDetailPage() {
       <div className="flex flex-col gap-3">
         <div className="flex flex-col">
           <button
+            onClick={() => handleApplySinglePool("__rotate_random__")}
+            disabled={bulkUpdatingProxy || activePools.length < 2}
+            className="flex items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors hover:bg-black/[0.04] dark:hover:bg-white/[0.04] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <span className="material-symbols-outlined text-text-muted text-[18px]">shuffle</span>
+            <span className="text-sm text-text-main">Random across all active pools (per request)</span>
+          </button>
+          <button
+            onClick={() => handleApplySinglePool("__rotate_rr__")}
+            disabled={bulkUpdatingProxy || activePools.length < 2}
+            className="flex items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors hover:bg-black/[0.04] dark:hover:bg-white/[0.04] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <span className="material-symbols-outlined text-text-muted text-[18px]">autorenew</span>
+            <span className="text-sm text-text-main">Round-robin across all active pools (per request)</span>
+          </button>
+          <button
             onClick={handleApplyOneToOne}
             disabled={bulkUpdatingProxy || activePools.length === 0}
             className="flex items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors hover:bg-black/[0.04] dark:hover:bg-white/[0.04] disabled:cursor-not-allowed disabled:opacity-50"
           >
             <span className="material-symbols-outlined text-text-muted text-[18px]">sync_alt</span>
-            <span className="text-sm text-text-main">One-to-one (rotate)</span>
+            <span className="text-sm text-text-main">One-to-one (pin 1 pool per connection)</span>
           </button>
           <button
             onClick={() => handleApplySinglePool(null)}

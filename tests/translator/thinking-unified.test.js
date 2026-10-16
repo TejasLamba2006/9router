@@ -157,6 +157,20 @@ describe("applyThinking per provider format", () => {
     const out = apply("openai", "glm-5.2", { reasoning_effort: "low" }, "glm-cn");
     expect(out.reasoning_effort).toBe("low");
   });
+  it.each([
+    ["opencode", "glm-5.3-flash-free"],
+    ["opencode", "glm-5.3-flash"],
+    ["opencode", "glm-5.3-free"],
+    ["opencode", "glm-5.3"],
+    ["opencode-zen", "glm-5.3-flash-free"],
+    ["opencode-zen", "glm-5.3-flash"],
+    ["opencode-go", "glm-5.3-flash"],
+    ["opencode-go", "glm-5.3"],
+  ])("%s/%s uses reasoning_effort and strips top-level thinking object", (provider, model) => {
+    const out = apply("openai", model, { thinking: { type: "enabled", budget_tokens: 8192 } }, provider);
+    expect(out.thinking).toBeUndefined();
+    expect(out.reasoning_effort).toBe("medium");
+  });
   it("GLM-4.7 (pre-5.2) does not get reasoning_effort — z.ai ignores it", () => {
     const out = apply("openai", "glm-4.7", { reasoning_effort: "low" }, "glm-cn");
     expect(out.thinking).toEqual({ type: "enabled" });

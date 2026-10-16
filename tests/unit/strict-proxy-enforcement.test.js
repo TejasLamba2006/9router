@@ -52,6 +52,20 @@ describe("strict pool keeps strictProxy when the pool is unusable (#4333)", () =
     const cfg = await resolveConnectionProxyConfig({});
     expect(cfg.strictProxy).toBe(false);
   });
+
+  it("resolves a local (this PC) proxy pool entry to a direct connection", async () => {
+    getProxyPoolById.mockResolvedValue({
+      id: "__local__", type: "local", isActive: true, proxyUrl: "direct://local", strictProxy: false,
+    });
+    const cfg = await resolveConnectionProxyConfig({ proxyPoolId: "__local__" });
+    expect(cfg).toMatchObject({
+      source: "local",
+      proxyPoolId: "__local__",
+      connectionProxyEnabled: false,
+      connectionProxyUrl: "",
+      strictProxy: false,
+    });
+  });
 });
 
 describe("strictProxy refuses a direct connection (#4333)", () => {

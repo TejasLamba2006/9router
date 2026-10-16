@@ -31,6 +31,7 @@ function credentialsFromConnection(connection, resolvedProxy) {
       connectionProxyUrl: resolvedProxy.connectionProxyUrl,
       connectionNoProxy: resolvedProxy.connectionNoProxy,
       connectionProxyPoolId: resolvedProxy.proxyPoolId || null,
+      connectionProxyType: resolvedProxy.proxyPool?.type || (resolvedProxy.source === "local" ? "local" : ""),
       strictProxy: resolvedProxy.strictProxy === true,
       vercelRelayUrl: resolvedProxy.vercelRelayUrl || "",
     },
@@ -56,7 +57,7 @@ async function resolveNoAuthProxy(providerId) {
   if (strategy !== "none") {
     const pools = await getProxyPools({ isActive: true });
     poolId = pickProxyPoolId(
-      pools.filter((pool) => pool.proxyUrl).map((pool) => pool.id),
+      pools.filter((pool) => pool.proxyUrl || pool.type === "local").map((pool) => pool.id),
       strategy,
       providerId
     );
@@ -88,7 +89,16 @@ export async function getProviderCredentialsById(provider, connectionId) {
 
   const connection = await getProviderConnectionById(connectionId);
   if (!connection || connection.isActive === false || resolveProviderId(connection.provider) !== providerId) return null;
-  const resolvedProxy = await resolveConnectionProxyConfig(connection.providerSpecificData || {});
+  const psd = { ...(connection.providerSpecificData || {}) };
+  if (psd.proxyPoolId === "__rotate_random__" || psd.proxyPoolId === "__rotate_rr__") {
+    const pools = await getProxyPools({ isActive: true });
+    psd.proxyPoolId = pickProxyPoolId(
+      pools.filter((pool) => pool.proxyUrl || pool.type === "local").map((pool) => pool.id),
+      psd.proxyPoolId === "__rotate_rr__" ? "round-robin" : "random",
+      `${providerId}:${connection.id}`
+    ) || "";
+  }
+  const resolvedProxy = await resolveConnectionProxyConfig(psd);
   return credentialsFromConnection(connection, resolvedProxy);
 }
 
@@ -123,6 +133,7 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
           connectionProxyUrl: resolvedProxy.connectionProxyUrl,
           connectionNoProxy: resolvedProxy.connectionNoProxy,
           connectionProxyPoolId: resolvedProxy.proxyPoolId || null,
+          connectionProxyType: resolvedProxy.proxyPool?.type || (resolvedProxy.source === "local" ? "local" : ""),
           vercelRelayUrl: resolvedProxy.vercelRelayUrl || "",
           strictProxy: resolvedProxy.strictProxy === true,
         },
@@ -262,7 +273,19 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
       connection = availableConnections[0];
     }
 
-    const resolvedProxy = await resolveConnectionProxyConfig(connection.providerSpecificData || {});
+    const psd = { ...(connection.providerSpecificData || {}) };
+    const rotateMode = psd.proxyPoolId === "__rotate_random__" ? "random"
+      : psd.proxyPoolId === "__rotate_rr__" ? "round-robin"
+      : (providerOverride.rotateStrategy && providerOverride.rotateStrategy !== "none" ? providerOverride.rotateStrategy : null);
+    if (rotateMode) {
+      const pools = await getProxyPools({ isActive: true });
+      psd.proxyPoolId = pickProxyPoolId(
+        pools.filter((pool) => pool.proxyUrl || pool.type === "local").map((pool) => pool.id),
+        rotateMode,
+        `${providerId}:${connection.id}`
+      ) || "";
+    }
+    const resolvedProxy = await resolveConnectionProxyConfig(psd);
 
     return credentialsFromConnection(connection, resolvedProxy);
   } finally {

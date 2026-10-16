@@ -16,16 +16,23 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
 
   const proxyPoolMap = new Map((proxyPools || []).map((pool) => [pool.id, pool]));
   const boundProxyPoolId = connection.providerSpecificData?.proxyPoolId || null;
-  const boundProxyPool = boundProxyPoolId ? proxyPoolMap.get(boundProxyPoolId) : null;
+  const isRotatingRandom = boundProxyPoolId === "__rotate_random__";
+  const isRotatingRR = boundProxyPoolId === "__rotate_rr__";
+  const isRotating = isRotatingRandom || isRotatingRR;
+  const boundProxyPool = boundProxyPoolId && !isRotating ? proxyPoolMap.get(boundProxyPoolId) : null;
   const hasLegacyProxy = connection.providerSpecificData?.connectionProxyEnabled === true && !!connection.providerSpecificData?.connectionProxyUrl;
   const hasAnyProxy = !!boundProxyPoolId || hasLegacyProxy;
-  const proxyDisplayText = boundProxyPool
-    ? `Pool: ${boundProxyPool.name}`
-    : boundProxyPoolId
-      ? `Pool: ${boundProxyPoolId} (inactive/missing)`
-      : hasLegacyProxy
-        ? `Legacy: ${connection.providerSpecificData?.connectionProxyUrl}`
-        : "";
+  const proxyDisplayText = isRotatingRandom
+    ? "Proxy: Random (all active)"
+    : isRotatingRR
+      ? "Proxy: Round-robin (all active)"
+      : boundProxyPool
+        ? `Pool: ${boundProxyPool.name}`
+        : boundProxyPoolId
+          ? `Pool: ${boundProxyPoolId} (inactive/missing)`
+          : hasLegacyProxy
+            ? `Legacy: ${connection.providerSpecificData?.connectionProxyUrl}`
+            : "";
   const autoPingTooltip = (() => {
     if (!autoPing) return "";
     const activeModes = [];
@@ -53,7 +60,7 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
   const noProxyText = boundProxyPool?.noProxy || connection.providerSpecificData?.connectionNoProxy || "";
 
   let proxyBadgeVariant = "default";
-  if (boundProxyPool?.isActive === true) {
+  if (boundProxyPool?.isActive === true || isRotating) {
     proxyBadgeVariant = "success";
   } else if (boundProxyPoolId || hasLegacyProxy) {
     proxyBadgeVariant = "error";
@@ -282,7 +289,19 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
                     onClick={() => handleSelectProxy("__none__")}
                     className={`w-full text-left px-3 py-1.5 text-sm hover:bg-black/5 dark:hover:bg-white/5 ${!boundProxyPoolId ? "text-primary font-medium" : "text-text-main"}`}
                   >
-                    None
+                    None (Direct)
+                  </button>
+                  <button
+                    onClick={() => handleSelectProxy("__rotate_random__")}
+                    className={`w-full text-left px-3 py-1.5 text-sm hover:bg-black/5 dark:hover:bg-white/5 ${boundProxyPoolId === "__rotate_random__" ? "text-primary font-medium" : "text-text-main"}`}
+                  >
+                    Random (all active pools)
+                  </button>
+                  <button
+                    onClick={() => handleSelectProxy("__rotate_rr__")}
+                    className={`w-full text-left px-3 py-1.5 text-sm hover:bg-black/5 dark:hover:bg-white/5 ${boundProxyPoolId === "__rotate_rr__" ? "text-primary font-medium" : "text-text-main"}`}
+                  >
+                    Round-robin (all active pools)
                   </button>
                   {(proxyPools || []).map((pool) => (
                     <button

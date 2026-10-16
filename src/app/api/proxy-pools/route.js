@@ -7,7 +7,7 @@ function toBoolean(value) {
   return undefined;
 }
 
-const VALID_PROXY_TYPES = ["http", "vercel", "cloudflare", "deno", "netlify"];
+const VALID_PROXY_TYPES = ["http", "vercel", "cloudflare", "deno", "netlify", "local"];
 
 function normalizeProxyPoolInput(body = {}) {
   const name = typeof body?.name === "string" ? body.name.trim() : "";
@@ -21,11 +21,11 @@ function normalizeProxyPoolInput(body = {}) {
     return { error: "Name is required" };
   }
 
-  if (!proxyUrl) {
+  if (type !== "local" && !proxyUrl) {
     return { error: "Proxy URL is required" };
   }
 
-  return { name, proxyUrl, noProxy, isActive, strictProxy, type };
+  return { name, proxyUrl: proxyUrl || (type === "local" ? "direct://local" : ""), noProxy, isActive, strictProxy, type };
 }
 
 function buildUsageMap(connections = []) {
