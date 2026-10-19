@@ -105,6 +105,10 @@ export class BaseExecutor {
 
     // Merge default retry config with provider-specific config
     const retryConfig = { ...DEFAULT_RETRY_CONFIG, ...this.config.retry };
+    let activeProxyOptions = proxyOptions;
+    const remainingProxyCandidates = Array.isArray(proxyOptions?.proxyCandidates)
+      ? [...proxyOptions.proxyCandidates]
+      : [];
 
     // Schedule retry via retryConfig[statusKey]. Returns true when caller should `urlIndex--; continue`
     // response (optional) lets a subclass hook compute a dynamic delay (e.g. antigravity Retry-After).
@@ -119,6 +123,18 @@ export class BaseExecutor {
         if (dynamic != null) waitMs = dynamic;
       }
       retryAttemptsByUrl[urlIndex]++;
+      if (
+        remainingProxyCandidates.length > 0 &&
+        (statusKey === HTTP_STATUS.BAD_GATEWAY ||
+          statusKey === HTTP_STATUS.SERVICE_UNAVAILABLE ||
+          statusKey === HTTP_STATUS.GATEWAY_TIMEOUT)
+      ) {
+        activeProxyOptions = remainingProxyCandidates.shift();
+        log?.info?.(
+          "PROXY",
+          `${this.provider.toUpperCase()} | rotating proxy on ${reason} -> pool=${activeProxyOptions.proxyPoolId || "direct"}`
+        );
+      }
       log?.debug?.("RETRY", `${reason} retry ${retryAttemptsByUrl[urlIndex]}/${attempts} after ${waitMs / 1000}s`);
       await new Promise(resolve => setTimeout(resolve, waitMs));
       return true;
@@ -148,7 +164,7 @@ export class BaseExecutor {
           headers,
           body: bodyStr,
           signal: mergedSignal
-        }, proxyOptions);
+        }, activeProxyOptions);
         clearTimeout(connectTimer);
         const ct = response.headers?.get?.("content-type") || "";
         const cl = response.headers?.get?.("content-length") || "?";

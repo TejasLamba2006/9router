@@ -12,6 +12,37 @@ let selectionMutex = Promise.resolve();
 
 const GITHUB_MONTHLY_USAGE_LIMIT = "you've reached your additional usage limit for your plan";
 
+function toProxyOptionCandidate(resolvedProxy) {
+  return {
+    connectionProxyEnabled: resolvedProxy.connectionProxyEnabled === true,
+    connectionProxyUrl: resolvedProxy.connectionProxyUrl || "",
+    connectionNoProxy: resolvedProxy.connectionNoProxy || "",
+    strictProxy: resolvedProxy.strictProxy === true,
+    vercelRelayUrl: resolvedProxy.vercelRelayUrl || "",
+    proxyType: resolvedProxy.proxyPool?.type || (resolvedProxy.source === "local" ? "local" : ""),
+    proxyPoolId: resolvedProxy.proxyPoolId || null,
+  };
+}
+
+async function buildRotatedProxyWithCandidates(basePsd, rotateMode, stateKey) {
+  const psd = { ...(basePsd || {}) };
+  const pools = await getProxyPools({ isActive: true });
+  const usableIds = pools
+    .filter((pool) => pool.proxyUrl || pool.type === "local")
+    .map((pool) => pool.id);
+  const pickedId = pickProxyPoolId(usableIds, rotateMode, stateKey) || "";
+  psd.proxyPoolId = pickedId;
+  const primary = await resolveConnectionProxyConfig(psd);
+  const candidates = [];
+  for (const altId of usableIds) {
+    if (altId === pickedId) continue;
+    const altResolved = await resolveConnectionProxyConfig({ ...psd, proxyPoolId: altId });
+    candidates.push(toProxyOptionCandidate(altResolved));
+  }
+  primary.proxyPoolCandidates = candidates;
+  return primary;
+}
+
 function credentialsFromConnection(connection, resolvedProxy) {
   return {
     authType: connection.authType,
@@ -34,6 +65,7 @@ function credentialsFromConnection(connection, resolvedProxy) {
       connectionProxyType: resolvedProxy.proxyPool?.type || (resolvedProxy.source === "local" ? "local" : ""),
       strictProxy: resolvedProxy.strictProxy === true,
       vercelRelayUrl: resolvedProxy.vercelRelayUrl || "",
+      proxyPoolCandidates: resolvedProxy.proxyPoolCandidates || [],
     },
     connectionId: connection.id,
     testStatus: connection.testStatus,
@@ -53,14 +85,9 @@ async function resolveNoAuthProxy(providerId) {
   const settings = await getSettings();
   const override = (settings.providerStrategies || {})[providerId] || {};
   const strategy = override.rotateStrategy || "none";
-  let poolId = override.proxyPoolId || null;
+  const poolId = override.proxyPoolId || null;
   if (strategy !== "none") {
-    const pools = await getProxyPools({ isActive: true });
-    poolId = pickProxyPoolId(
-      pools.filter((pool) => pool.proxyUrl || pool.type === "local").map((pool) => pool.id),
-      strategy,
-      providerId
-    );
+    return buildRotatedProxyWithCandidates({}, strategy, providerId);
   }
   return resolveConnectionProxyConfig({ proxyPoolId: poolId || "" });
 }
@@ -90,15 +117,16 @@ export async function getProviderCredentialsById(provider, connectionId) {
   const connection = await getProviderConnectionById(connectionId);
   if (!connection || connection.isActive === false || resolveProviderId(connection.provider) !== providerId) return null;
   const psd = { ...(connection.providerSpecificData || {}) };
+  let resolvedProxy;
   if (psd.proxyPoolId === "__rotate_random__" || psd.proxyPoolId === "__rotate_rr__") {
-    const pools = await getProxyPools({ isActive: true });
-    psd.proxyPoolId = pickProxyPoolId(
-      pools.filter((pool) => pool.proxyUrl || pool.type === "local").map((pool) => pool.id),
+    resolvedProxy = await buildRotatedProxyWithCandidates(
+      psd,
       psd.proxyPoolId === "__rotate_rr__" ? "round-robin" : "random",
       `${providerId}:${connection.id}`
-    ) || "";
+    );
+  } else {
+    resolvedProxy = await resolveConnectionProxyConfig(psd);
   }
-  const resolvedProxy = await resolveConnectionProxyConfig(psd);
   return credentialsFromConnection(connection, resolvedProxy);
 }
 
@@ -136,6 +164,7 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
           connectionProxyType: resolvedProxy.proxyPool?.type || (resolvedProxy.source === "local" ? "local" : ""),
           vercelRelayUrl: resolvedProxy.vercelRelayUrl || "",
           strictProxy: resolvedProxy.strictProxy === true,
+          proxyPoolCandidates: resolvedProxy.proxyPoolCandidates || [],
         },
       };
     }
@@ -277,15 +306,9 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     const rotateMode = psd.proxyPoolId === "__rotate_random__" ? "random"
       : psd.proxyPoolId === "__rotate_rr__" ? "round-robin"
       : (providerOverride.rotateStrategy && providerOverride.rotateStrategy !== "none" ? providerOverride.rotateStrategy : null);
-    if (rotateMode) {
-      const pools = await getProxyPools({ isActive: true });
-      psd.proxyPoolId = pickProxyPoolId(
-        pools.filter((pool) => pool.proxyUrl || pool.type === "local").map((pool) => pool.id),
-        rotateMode,
-        `${providerId}:${connection.id}`
-      ) || "";
-    }
-    const resolvedProxy = await resolveConnectionProxyConfig(psd);
+    const resolvedProxy = rotateMode
+      ? await buildRotatedProxyWithCandidates(psd, rotateMode, `${providerId}:${connection.id}`)
+      : await resolveConnectionProxyConfig(psd);
 
     return credentialsFromConnection(connection, resolvedProxy);
   } finally {
@@ -305,6 +328,13 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
  */
 export async function markAccountUnavailable(connectionId, status, errorText, provider = null, model = null, resetsAtMs = null) {
   if (!connectionId || connectionId === "noauth") return { shouldFallback: false, cooldownMs: 0 };
+  if (
+    (Number(status) === 502 || Number(status) === 504) &&
+    /FUNCTION_INVOCATION_TIMEOUT|An error occurred with your deployment|DEPLOYMENT_/i.test(String(errorText || ""))
+  ) {
+    log.warn("AUTH", `Skipping account lock for ${connectionId.slice(0, 8)}: relay/proxy timeout (${status})`);
+    return { shouldFallback: true, cooldownMs: 0 };
+  }
   const connections = await getProviderConnections({ provider });
   const conn = connections.find(c => c.id === connectionId);
   const backoffLevel = conn?.backoffLevel || 0;
