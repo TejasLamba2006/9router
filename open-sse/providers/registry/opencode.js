@@ -28,6 +28,7 @@ export default {
     },
     quirks: {
       forceAutoToolChoiceModels: ["muse-spark-1.3-contributor-free"],
+      reasoningAliasFields: true,
     },
   },
   models: [

@@ -54,6 +54,12 @@ function baseId(modelId) {
   return withoutVendor.toLowerCase().split(":")[0];
 }
 
+const CANONICAL_OWNER_PROVIDERS = new Set([
+  "openai", "anthropic", "google", "google-vertex", "azure", "deepseek",
+  "xai", "mistral", "cohere", "alibaba", "moonshotai", "zhipuai", "zai",
+  "minimax", "nvidia", "meta", "openrouter",
+]);
+
 function writeAtomic(file, contents) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(`${file}.tmp`, contents, "utf8");
@@ -181,13 +187,21 @@ export function build(catalog, entries) {
 
   const reported = {};
   const canonicalPricing = {};
-  const basenameCanonicalIds = new Map();
+  const explicitCanonicalIds = new Map();
+  const ownerCanonicalIds = new Map();
+  const pricingByCanonicalId = new Map();
+  const pricingByBasename = new Map();
   for (const [providerId, provider] of Object.entries(catalog)) {
     const records = {};
     for (const [modelId, model] of Object.entries(provider?.models || {})) {
-      const canonicalModelId = model?.canonical_model_id
+      const explicitCanonicalId = model?.canonical_model_id || null;
+      const canonicalModelId = explicitCanonicalId
         || (!modelId.includes("/") ? `${providerId}/${modelId}` : null);
       const pricing = modelPricing(model);
+      const hasValidPricing = Number.isFinite(pricing.input) && Number.isFinite(pricing.output)
+        && pricing.input >= 0 && pricing.output >= 0;
+      const isFreeVariant = modelId.toLowerCase().includes(":free") || modelId.toLowerCase().endsWith("-free");
+      const basename = baseId(modelId);
       records[modelId] = {
         name: model?.name || modelId,
         canonicalModelId,
@@ -213,20 +227,76 @@ export function build(catalog, entries) {
       };
       if (canonicalModelId) {
         const canonicalProvider = canonicalModelId.split("/")[0];
-        if (canonicalProvider === providerId && Number.isFinite(pricing.input) && Number.isFinite(pricing.output)) {
+        if (canonicalProvider === providerId && hasValidPricing) {
           canonicalPricing[canonicalModelId] = pricing;
         }
-        const basename = baseId(modelId);
-        let ids = basenameCanonicalIds.get(basename);
-        if (!ids) basenameCanonicalIds.set(basename, (ids = new Set()));
-        ids.add(canonicalModelId);
+        let owners = ownerCanonicalIds.get(basename);
+        if (!owners) ownerCanonicalIds.set(basename, (owners = new Set()));
+        owners.add(canonicalModelId);
+      }
+      if (explicitCanonicalId) {
+        let explicit = explicitCanonicalIds.get(basename);
+        if (!explicit) explicitCanonicalIds.set(basename, (explicit = new Set()));
+        explicit.add(explicitCanonicalId);
+        if (hasValidPricing && !isFreeVariant && (pricing.input > 0 || pricing.output > 0)) {
+          let byRate = pricingByCanonicalId.get(explicitCanonicalId);
+          if (!byRate) pricingByCanonicalId.set(explicitCanonicalId, (byRate = new Map()));
+          const key = `${pricing.input}|${pricing.output}`;
+          const cur = byRate.get(key) || { count: 0, pricing, trusted: false };
+          cur.count += 1;
+          if (CANONICAL_OWNER_PROVIDERS.has(providerId)) cur.trusted = true;
+          byRate.set(key, cur);
+        }
+      }
+      if (hasValidPricing && !isFreeVariant && (pricing.input > 0 || pricing.output > 0)) {
+        let byRate = pricingByBasename.get(basename);
+        if (!byRate) pricingByBasename.set(basename, (byRate = new Map()));
+        const key = `${pricing.input}|${pricing.output}`;
+        const cur = byRate.get(key) || { count: 0, pricing, providerId, trusted: false };
+        cur.count += 1;
+        if (CANONICAL_OWNER_PROVIDERS.has(providerId)) cur.trusted = true;
+        byRate.set(key, cur);
       }
     }
     reported[providerId] = records;
   }
+
+  for (const [cid, byRate] of pricingByCanonicalId) {
+    if (!canonicalPricing[cid] && byRate.size > 0) {
+      canonicalPricing[cid] = [...byRate.values()]
+        .sort((a, b) => (Number(b.trusted) - Number(a.trusted)) || (b.count - a.count))[0].pricing;
+    }
+  }
+
   const uniqueCanonicalBasename = {};
-  for (const [basename, ids] of basenameCanonicalIds) {
-    if (ids.size === 1) uniqueCanonicalBasename[basename] = [...ids][0];
+  const allBasenames = new Set([
+    ...explicitCanonicalIds.keys(),
+    ...ownerCanonicalIds.keys(),
+    ...pricingByBasename.keys(),
+  ]);
+  for (const basename of allBasenames) {
+    const explicit = explicitCanonicalIds.get(basename);
+    const owners = ownerCanonicalIds.get(basename);
+    let chosen = null;
+    if (explicit && explicit.size === 1) {
+      chosen = [...explicit][0];
+    } else if (owners && owners.size === 1) {
+      chosen = [...owners][0];
+    } else if (owners && owners.size > 1) {
+      const trusted = [...owners].filter((cid) => CANONICAL_OWNER_PROVIDERS.has(cid.split("/")[0]));
+      if (trusted.length === 1) chosen = trusted[0];
+    }
+    if (chosen) {
+      uniqueCanonicalBasename[basename] = chosen;
+    } else if (pricingByBasename.has(basename)) {
+      const best = [...pricingByBasename.get(basename).values()]
+        .sort((a, b) => (Number(b.trusted) - Number(a.trusted)) || (b.count - a.count))[0];
+      if (best) {
+        const synthId = `${best.providerId}/${basename}`;
+        uniqueCanonicalBasename[basename] = synthId;
+        if (!canonicalPricing[synthId]) canonicalPricing[synthId] = best.pricing;
+      }
+    }
   }
 
   return {

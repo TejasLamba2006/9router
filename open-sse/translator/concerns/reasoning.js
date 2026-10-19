@@ -7,6 +7,13 @@ export function reasoningDelta(text, withRole = false) {
     : { reasoning_content: text };
 }
 
+export function liftReasoningAliases(delta) {
+  if (!delta || typeof delta !== "object") return delta;
+  if (typeof delta.reasoning_content === "string" && delta.reasoning_content) return delta;
+  const text = extractReasoningText(delta);
+  return text ? { ...delta, reasoning_content: text } : delta;
+}
+
 // Extract reasoning text from a streamed OpenAI-compatible delta across vendor shapes:
 //   - reasoning_content (GLM, Qwen, DeepSeek, Kimi, Step, Hunyuan)
 //   - reasoning (some compat layers)

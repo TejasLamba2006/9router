@@ -94,6 +94,10 @@ export const MODEL_PRICING = {
   "o1-mini":                      { input: 3.00,  output: 12.00, cached: 1.50,  reasoning: 18.00,  cache_creation: 3.00  },
 
   // === Gemini ===
+  "gemini-4-argon":                { input: 2.00,  output: 10.00, cached: 0.10,  reasoning: 10.00,  cache_creation: 2.00 },
+  "gemini-4-argon-high":           { input: 2.00,  output: 10.00, cached: 0.10,  reasoning: 10.00,  cache_creation: 2.00 },
+  "gemini-4-argon-medium":         { input: 2.00,  output: 10.00, cached: 0.10,  reasoning: 10.00,  cache_creation: 2.00 },
+  "gemini-4-argon-low":            { input: 2.00,  output: 10.00, cached: 0.10,  reasoning: 10.00,  cache_creation: 2.00 },
   "gemini-3.8-flash":              { input: 1.50,  output: 7.50,  cached: 0.15,  reasoning: 11.25,  cache_creation: 1.875 },
   "gemini-3.8-flash-high":         { input: 1.50,  output: 7.50,  cached: 0.15,  reasoning: 11.25,  cache_creation: 1.875 },
   "gemini-3.8-flash-medium":       { input: 1.50,  output: 7.50,  cached: 0.15,  reasoning: 11.25,  cache_creation: 1.875 },
@@ -429,12 +433,23 @@ export function getPricingForModel(provider, model) {
 
   // 3. Canonical model pricing (strip vendor prefix if needed: "deepseek/deepseek-chat" → "deepseek-chat")
   const baseModel = model.includes("/") ? model.split("/").pop() : model;
-  if (MODEL_PRICING[baseModel]) return MODEL_PRICING[baseModel];
-  if (MODEL_PRICING[model]) return MODEL_PRICING[model];
+  const normalizedBase = baseModel.replace(/^gpt-35-/i, "gpt-3.5-");
+  const dateStripped = normalizedBase
+    .replace(/-\d{4}-\d{2}-\d{2}(?:-[a-z0-9]+)*$/i, "")
+    .replace(/-\d{2}-\d{4}$/i, "")
+    .replace(/-(?:0\d{3}|1\d{3}|\d{4})(?:-preview)?$/i, "");
+  for (const cand of [baseModel, normalizedBase, dateStripped, model]) {
+    if (MODEL_PRICING[cand]) return MODEL_PRICING[cand];
+  }
 
   // 4. Pattern match
   for (const { pattern, pricing } of PATTERN_PRICING) {
-    if (matchPattern(pattern, baseModel) || matchPattern(pattern, model)) {
+    if (
+      matchPattern(pattern, baseModel) ||
+      matchPattern(pattern, normalizedBase) ||
+      matchPattern(pattern, dateStripped) ||
+      matchPattern(pattern, model)
+    ) {
       return pricing;
     }
   }

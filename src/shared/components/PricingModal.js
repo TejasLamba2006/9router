@@ -186,7 +186,7 @@ export default function PricingModal({ isOpen, onClose, onSave }) {
                                   </div>
                                 </td>
                                 <td className="px-3 py-2 text-xs text-text-muted whitespace-nowrap">
-                                  {entry?.source === "models.dev-provider" ? "models.dev" : entry?.source || "unknown"}
+                                  {entry?.source === "models.dev-provider" || entry?.source === "models.dev-canonical" ? "models.dev" : entry?.source || "unknown"}
                                 </td>
                                 {pricingFields.map(field => (
                                   <td key={field} className="px-3 py-2">

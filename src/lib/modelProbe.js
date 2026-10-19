@@ -1,6 +1,7 @@
 import { getProviderCredentialsById } from "@/sse/services/auth.js";
 import { checkAndRefreshToken, updateProviderCredentials } from "@/sse/services/tokenRefresh.js";
 import { getSettings } from "@/lib/localDb";
+import { emitRequestError } from "@/lib/usageDb";
 import { handleChatCore } from "open-sse/handlers/chatCore.js";
 import { getModelInfo } from "@/sse/services/model.js";
 import { enforceModelEnabled } from "@/sse/services/modelVisibility.js";
@@ -125,6 +126,7 @@ export async function runModelProbe({ provider, model, kind = "llm", connectionI
     if (!result.success) {
       const message = sanitizeProbeMessage(result.error, secrets);
       const timedOut = timeoutSignal.aborted && !signal?.aborted;
+      emitRequestError({ provider: resolved.provider, model: resolved.model, status: result.status || 502, message });
       return {
         modelId: model, kind, classification: classifyProbeResult({ status: result.status, message, timedOut }), ok: false,
         status: result.status || null, latencyMs: Date.now() - startedAt,
@@ -136,6 +138,14 @@ export async function runModelProbe({ provider, model, kind = "llm", connectionI
     const evidence = extractProbeEvidence(payload);
     const ok = Boolean(evidence.text.trim() || evidence.toolCalls.length || evidence.reasoning);
     const classification = classifyProbeResult({ ok, status: result.response.status, finishReason: evidence.finishReason });
+    if (!ok) {
+      emitRequestError({
+        provider: resolved.provider,
+        model: resolved.model,
+        status: result.response.status || 200,
+        message: "Provider returned no completion evidence",
+      });
+    }
     return {
       modelId: model, kind, classification, ok: classification === "healthy", status: result.response.status,
       latencyMs: Date.now() - startedAt, retryAfterMs: 0,
@@ -144,6 +154,14 @@ export async function runModelProbe({ provider, model, kind = "llm", connectionI
   } catch (error) {
     const timedOut = timeoutSignal.aborted && !signal?.aborted;
     const message = sanitizeProbeMessage(error?.message || error, secrets);
+    if (!signal?.aborted) {
+      emitRequestError({
+        provider: resolved.provider,
+        model: resolved.model,
+        status: timedOut ? 504 : 502,
+        message,
+      });
+    }
     return {
       modelId: model, kind,
       classification: signal?.aborted ? "skipped" : classifyProbeResult({ timedOut, networkError: !timedOut, message }),

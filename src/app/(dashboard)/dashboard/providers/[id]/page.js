@@ -11,6 +11,7 @@ import { getModelsByProviderId, getModelKind } from "@/shared/constants/models";
 import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { useModelCaps } from "@/shared/hooks/useModelCaps";
+import { useNotificationStore } from "@/store/notificationStore";
 import { translate } from "@/i18n/runtime";
 import { fetchSuggestedModels } from "@/shared/utils/providerModelsFetcher";
 import { getProviderCustomModelRows } from "@/shared/utils/providerCustomModels";
@@ -780,6 +781,21 @@ export default function ProviderDetailPage() {
 
         if (index < connections.length - 1) {
           await sleep(ONE_BY_ONE_DELAY_MS);
+        }
+      }
+      if (!stopOneByOneRef.current && connections.length > 0) {
+        if (failed === 0) {
+          useNotificationStore.getState().addNotification({
+            type: "success",
+            title: `All ${passed} connection(s) passed`,
+            message: `${providerId} connection check succeeded`,
+          });
+        } else {
+          useNotificationStore.getState().addNotification({
+            type: "warning",
+            title: `${passed}/${connections.length} passed, ${failed} failed`,
+            message: `${providerId} connection check finished`,
+          });
         }
       }
     } finally {

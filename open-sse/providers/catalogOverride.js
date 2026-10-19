@@ -16,7 +16,7 @@ export const CATALOG_RAW_FILE = path.join(DATA_DIR, "model-catalog-raw.json");
 // Schema of the file this module reads. The writer stamps it; a file carrying an
 // older value predates provider-scoped modality keys, and its flat keys are not
 // looked up here, so the sync rebuilds it instead of asking upstream for a 304.
-export const CATALOG_VERSION = 4;
+export const CATALOG_VERSION = 5;
 
 const EMPTY = {
   models: {}, providers: {}, providerMap: {}, reported: {},
@@ -30,6 +30,29 @@ function baseId(model) {
   if (!model) return "";
   const withoutVendor = model.includes("/") ? model.split("/").pop() : model;
   return withoutVendor.toLowerCase().split(":")[0];
+}
+
+// Generate normalized basename candidates for Azure/dated/vendor-prefixed model IDs
+// e.g. "gpt-5-mini-2025-08-07" -> ["gpt-5-mini-2025-08-07", "gpt-5-mini"]
+//      "gpt-35-turbo-0125" -> ["gpt-35-turbo-0125", "gpt-3.5-turbo-0125", "gpt-3.5-turbo"]
+//      "Meta-Llama-3.3-70B-Instruct-2" -> [..., "llama-3.3-70b-instruct"]
+function candidateBasenames(model) {
+  const b = baseId(model);
+  if (!b) return [];
+  const out = new Set([b]);
+  if (b.startsWith("gpt-35-")) out.add(`gpt-3.5-${b.slice("gpt-35-".length)}`);
+  for (const s of [...out]) {
+    out.add(s.replace(/-\d{4}-\d{2}-\d{2}(?:-[a-z0-9]+)*$/, ""));
+    out.add(s.replace(/-\d{2}-\d{4}$/, ""));
+    out.add(s.replace(/-(?:0\d{3}|1\d{3}|\d{4})(?:-preview)?$/, ""));
+    out.add(s.replace(/(?<=-instruct|-chat|-vision|-mini|-large|-small|-medium)-\d{1,2}$/, ""));
+  }
+  for (const s of [...out]) {
+    if (s.startsWith("meta-llama-")) out.add(s.slice("meta-".length));
+    if (s.startsWith("cohere-")) out.add(s.slice("cohere-".length));
+    if (s.startsWith("ai21-")) out.add(s.slice("ai21-".length));
+  }
+  return [...out].filter(Boolean);
 }
 
 function load() {
@@ -96,20 +119,38 @@ export function getCatalogReported(provider, model) {
   const data = load();
   const upstreamProvider = data.providerMap[provider] || provider;
   const byProvider = data.reported[upstreamProvider];
-  const record = byProvider?.[model] || byProvider?.[baseId(model)];
+  const candidates = candidateBasenames(model);
+  let record = byProvider?.[model];
+  if (!record && byProvider) {
+    for (const cand of candidates) {
+      if (byProvider[cand]) { record = byProvider[cand]; break; }
+    }
+  }
   if (record) return record;
-  const canonicalId = data.uniqueCanonicalBasename[baseId(model)];
-  if (!canonicalId) return null;
-  const separator = canonicalId.indexOf("/");
-  return data.reported[canonicalId.slice(0, separator)]?.[canonicalId.slice(separator + 1)] || null;
+  for (const cand of candidates) {
+    const canonicalId = data.uniqueCanonicalBasename[cand];
+    if (!canonicalId) continue;
+    const separator = canonicalId.indexOf("/");
+    const found = data.reported[canonicalId.slice(0, separator)]?.[canonicalId.slice(separator + 1)];
+    if (found) return found;
+  }
+  return null;
 }
 
 export function getCatalogPricing(provider, model) {
   if (!model) return null;
   const data = load();
   const upstreamProvider = data.providerMap[provider] || provider;
-  const record = data.reported[upstreamProvider]?.[model]
-    || data.reported[upstreamProvider]?.[baseId(model)];
+  const candidates = candidateBasenames(model);
+  let record = data.reported[upstreamProvider]?.[model];
+  if (!record && data.reported[upstreamProvider]) {
+    for (const cand of candidates) {
+      if (data.reported[upstreamProvider][cand]) {
+        record = data.reported[upstreamProvider][cand];
+        break;
+      }
+    }
+  }
   const providerRates = normalizeRates(record?.pricing);
   if (providerRates) {
     return {
@@ -121,8 +162,16 @@ export function getCatalogPricing(provider, model) {
     };
   }
 
-  const canonicalId = record?.canonicalModelId
-    || data.uniqueCanonicalBasename[baseId(model)];
+  let canonicalId = record?.canonicalModelId;
+  if (!canonicalId || !data.canonicalPricing[canonicalId]) {
+    for (const cand of candidates) {
+      const cid = data.uniqueCanonicalBasename[cand];
+      if (cid && data.canonicalPricing[cid]) {
+        canonicalId = cid;
+        break;
+      }
+    }
+  }
   const canonicalRates = normalizeRates(data.canonicalPricing[canonicalId]);
   if (!canonicalRates) return null;
   return {

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { consumeModelBatchStream } from "@/shared/utils/modelBatchClient.js";
 import { DEFAULT_AUTO_HIDE_CLASSIFICATIONS } from "@/lib/modelTestBatch.js";
+import { useNotificationStore } from "@/store/notificationStore";
 
 export default function useModelBatchTest({ providerId, connections, onVisibilityChanged, noAuth = false }) {
   const [selectedIds, setSelectedIds] = useState([]);
@@ -71,6 +72,13 @@ export default function useModelBatchTest({ providerId, connections, onVisibilit
       await consumeModelBatchStream(response.body, (event) => {
         if (event.type === "result") {
           setResults((previous) => ({ ...previous, [event.result.modelId]: event.result }));
+          if (modelIds.length === 1 && event.result.ok) {
+            useNotificationStore.getState().addNotification({
+              type: "success",
+              title: `OK · ${providerId}/${event.result.modelId}`,
+              message: event.result.latencyMs ? `Responded in ${event.result.latencyMs}ms` : "Model test passed",
+            });
+          }
           setState((previous) => ({
             ...previous,
             done: event.done,

@@ -521,8 +521,8 @@ export function openaiToAntigravityRequest(model, body, stream, credentials = nu
     return wrapInCloudCodeEnvelopeForClaude(model, claudeRequest, credentials);
   }
 
-  const geminiCLI = openaiToGeminiCLIRequest(model, body, stream);
-  return wrapInCloudCodeEnvelope(model, geminiCLI, credentials, true);
+  const gemini = openaiToGeminiCLIRequest(model, body, stream, credentials);
+  return wrapInCloudCodeEnvelope(model, gemini, credentials, true);
 }
 
 // Register

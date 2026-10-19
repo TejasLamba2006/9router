@@ -102,6 +102,14 @@ export function buildLoadingState(connections) {
   return nextLoadingState;
 }
 
+export function selectConnectionsToRefresh(connections, { force = false, tick = 0 } = {}) {
+  if (force) return connections;
+  const claudeEvery = Math.round(CLAUDE_REFRESH_INTERVAL_MS / REFRESH_INTERVAL_MS);
+  return connections.filter(
+    (connection) => connection.provider !== "claude" || tick % claudeEvery === 0,
+  );
+}
+
 export function filterQuotaStateByConnections(state, connections) {
   const visibleIds = new Set(connections.map((connection) => connection.id));
   return Object.fromEntries(

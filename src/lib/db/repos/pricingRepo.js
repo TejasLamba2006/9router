@@ -62,6 +62,12 @@ async function loadPricingSources() {
   return { getCatalogPricing: catalog.getCatalogPricing, resolveConst: pricing.getPricingForModel, isFreeModel: pricing.isFreeModel };
 }
 
+function resolveProviderKeySync(db, provider) {
+  if (!provider) return provider;
+  const node = db.get(`SELECT id FROM providerNodes WHERE id = ? OR json_extract(data, '$.prefix') = ? LIMIT 1`, [provider, provider]);
+  return node?.id || provider;
+}
+
 function resolvePricingSync(sources, userPricing, provider, model) {
   if (!model) return null;
   const { getCatalogPricing, resolveConst, isFreeModel } = sources;
@@ -81,21 +87,31 @@ function resolvePricingSync(sources, userPricing, provider, model) {
 
 export async function getPricingForModelWithSource(provider, model) {
   if (!model) return null;
-  const [userPricing, sources] = await Promise.all([getUserPricing(), loadPricingSources()]);
-  return resolvePricingSync(sources, userPricing, provider, model);
+  const [db, userPricing, sources] = await Promise.all([getAdapter(), getUserPricing(), loadPricingSources()]);
+  const canonicalProvider = resolveProviderKeySync(db, provider);
+  const mergedPricing = canonicalProvider !== provider && userPricing[provider]
+    ? { ...userPricing, [canonicalProvider]: { ...(userPricing[canonicalProvider] || {}), ...userPricing[provider] } }
+    : userPricing;
+  return resolvePricingSync(sources, mergedPricing, canonicalProvider, model);
 }
 
 export async function getPricingForModelsWithSource(provider, models) {
-  const [userPricing, sources] = await Promise.all([getUserPricing(), loadPricingSources()]);
-  return Object.fromEntries(models.map((model) => [model, resolvePricingSync(sources, userPricing, provider, model)]));
+  const [db, userPricing, sources] = await Promise.all([getAdapter(), getUserPricing(), loadPricingSources()]);
+  const canonicalProvider = resolveProviderKeySync(db, provider);
+  const mergedPricing = canonicalProvider !== provider && userPricing[provider]
+    ? { ...userPricing, [canonicalProvider]: { ...(userPricing[canonicalProvider] || {}), ...userPricing[provider] } }
+    : userPricing;
+  return Object.fromEntries(models.map((model) => [model, resolvePricingSync(sources, mergedPricing, canonicalProvider, model)]));
 }
 
 export async function createPricingResolver() {
   const sources = await loadPricingSources();
   return (db, provider, model) => {
-    const row = db.get(`SELECT value FROM kv WHERE scope = 'pricing' AND key = ?`, [provider]);
-    const manual = row ? { [provider]: parseJson(row.value, {}) || {} } : {};
-    return resolvePricingSync(sources, manual, provider, model)?.rates || null;
+    const canonicalProvider = resolveProviderKeySync(db, provider);
+    const row = db.get(`SELECT value FROM kv WHERE scope = 'pricing' AND key = ?`, [canonicalProvider])
+      || (canonicalProvider !== provider ? db.get(`SELECT value FROM kv WHERE scope = 'pricing' AND key = ?`, [provider]) : null);
+    const manual = row ? { [canonicalProvider]: parseJson(row.value, {}) || {} } : {};
+    return resolvePricingSync(sources, manual, canonicalProvider, model)?.rates || null;
   };
 }
 

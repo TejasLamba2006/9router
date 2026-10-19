@@ -1,4 +1,5 @@
 import { getProviderConnectionById, updateProviderConnection } from "@/lib/localDb";
+import { emitRequestError } from "@/lib/usageDb";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { testProxyUrl } from "@/lib/network/proxyTest";
 import { isOpenAICompatibleProvider, isAnthropicCompatibleProvider, AI_PROVIDERS } from "@/shared/constants/providers";
@@ -934,6 +935,12 @@ export async function testSingleConnection(id) {
         lastError: proxyError,
         lastErrorAt: new Date().toISOString(),
       });
+      emitRequestError({
+        provider: connection.provider,
+        model: connection.name || connection.email || id,
+        status: proxyResult.status || 502,
+        message: proxyError,
+      });
       return { valid: false, error: proxyError, latencyMs: 0, testedAt: new Date().toISOString() };
     }
   }
@@ -948,6 +955,15 @@ export async function testSingleConnection(id) {
   }
 
   const latencyMs = Date.now() - start;
+
+  if (!result.valid) {
+    emitRequestError({
+      provider: connection.provider,
+      model: connection.name || connection.email || id,
+      status: result.status || null,
+      message: result.error || "Connection test failed",
+    });
+  }
 
   // Soft success (e.g. Grok CLI 402 spending-limit): credentials are good, account is
   // out of credits. Keep testStatus active; surface the message as lastError so the

@@ -6,6 +6,7 @@ import { Card, Button, Modal } from "@/shared/components";
 import { getModelsByProviderId, getModelKind } from "@/shared/constants/models";
 import { getProviderAlias } from "@/shared/constants/providers";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
+import { useNotificationStore } from "@/store/notificationStore";
 
 // ── ModelRow ───────────────────────────────────────────────────
 export function ModelRow({ model, fullModel, copied, onCopy, testStatus, isCustom, isFree, onDeleteAlias, onTest, isTesting }) {
@@ -191,9 +192,21 @@ export default function ModelsCard({ providerId, kindFilter, providerAliasOverri
       const data = await res.json();
       setModelTestResults((prev) => ({ ...prev, [modelId]: data.ok ? "ok" : "error" }));
       setTestError(data.ok ? "" : (data.error || "Model not reachable"));
+      if (data.ok) {
+        useNotificationStore.getState().addNotification({
+          type: "success",
+          title: `OK · ${providerAlias}/${modelId}`,
+          message: data.latencyMs ? `Responded in ${data.latencyMs}ms` : "Model test passed",
+        });
+      }
     } catch {
       setModelTestResults((prev) => ({ ...prev, [modelId]: "error" }));
       setTestError("Network error");
+      useNotificationStore.getState().addNotification({
+        type: "error",
+        title: `Test failed · ${providerAlias}/${modelId}`,
+        message: "Network error",
+      });
     } finally { setTestingModelId(null); }
   };
 
