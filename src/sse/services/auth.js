@@ -27,16 +27,19 @@ function toProxyOptionCandidate(resolvedProxy) {
 async function buildRotatedProxyWithCandidates(basePsd, rotateMode, stateKey) {
   const psd = { ...(basePsd || {}) };
   const pools = await getProxyPools({ isActive: true });
-  const usableIds = pools
-    .filter((pool) => pool.proxyUrl || pool.type === "local")
-    .map((pool) => pool.id);
+  const allUsable = pools.filter((pool) => pool.proxyUrl || pool.type === "local");
+  const nonVercel = allUsable.filter((pool) => pool.type !== "vercel");
+  // Prefer non-Vercel pools (Cloudflare Worker / This PC Direct) when available so
+  // long-running reasoning streams do not hit Vercel's 60s FUNCTION_INVOCATION_TIMEOUT.
+  const primaryPoolList = nonVercel.length > 0 ? nonVercel : allUsable;
+  const usableIds = primaryPoolList.map((pool) => pool.id);
   const pickedId = pickProxyPoolId(usableIds, rotateMode, stateKey) || "";
   psd.proxyPoolId = pickedId;
   const primary = await resolveConnectionProxyConfig(psd);
   const candidates = [];
-  for (const altId of usableIds) {
-    if (altId === pickedId) continue;
-    const altResolved = await resolveConnectionProxyConfig({ ...psd, proxyPoolId: altId });
+  for (const altPool of allUsable) {
+    if (altPool.id === pickedId) continue;
+    const altResolved = await resolveConnectionProxyConfig({ ...psd, proxyPoolId: altPool.id });
     candidates.push(toProxyOptionCandidate(altResolved));
   }
   primary.proxyPoolCandidates = candidates;
