@@ -84,21 +84,31 @@ export function antigravityToOpenAIRequest(model, body, stream) {
   return result;
 }
 
-// Recursively convert Antigravity schema types (OBJECT, STRING, etc.) to lowercase
-// and strip unsupported fields like enumDescriptions
+// Proto3 JSON encodes int64 fields as strings ("0", "100"). JSON Schema
+// validators (Anthropic, OpenAI) require numeric values for these constraints.
+const INT64_SCHEMA_FIELDS = ["minItems", "maxItems", "minLength", "maxLength", "minProperties", "maxProperties"];
+
+// Recursively convert Antigravity schema types (OBJECT, STRING, etc.) to lowercase,
+// coerce Proto3 string-encoded integer constraints back to numbers, and strip
+// unsupported fields like enumDescriptions
 function normalizeSchemaTypes(schema) {
   if (!schema || typeof schema !== "object") return schema;
 
   const result = Array.isArray(schema) ? [...schema] : { ...schema };
 
-
   if (typeof result.type === "string") {
     result.type = result.type.toLowerCase();
   }
 
+  for (const field of INT64_SCHEMA_FIELDS) {
+    if (typeof result[field] === "string") {
+      const n = Number(result[field]);
+      if (Number.isInteger(n)) result[field] = n;
+    }
+  }
+
   // Strip enumDescriptions — not supported by upstream APIs
   delete result.enumDescriptions;
-
 
   if (result.properties) {
     const normalized = {};
@@ -110,6 +120,10 @@ function normalizeSchemaTypes(schema) {
 
   if (result.items) {
     result.items = normalizeSchemaTypes(result.items);
+  }
+
+  if (Array.isArray(result.anyOf)) {
+    result.anyOf = result.anyOf.map(normalizeSchemaTypes);
   }
 
   return result;

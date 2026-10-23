@@ -33,6 +33,27 @@ function isCodexResponsesLiteModel(model) {
 // Server-generated item id prefixes that Codex /responses cannot resolve when store=false
 const SERVER_ID_PATTERN = /^(rs|fc|resp|msg)_/;
 
+// OpenAI/Codex encrypts reasoning_content as Fernet ("gAAAAA..."). Another
+// Responses provider in the same combo or session (Grok via opencode-go, xAI)
+// emits its own ciphertext and UUID-shaped `rs_<uuid>` id; Codex tries to
+// decrypt it with OpenAI's key and 400s `invalid_encrypted_content`.
+const OPENAI_ENCRYPTED_REASONING_PREFIX = "gAAAAA";
+const FOREIGN_REASONING_UUID_ID = /^rs_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isForeignReasoningItem(item) {
+  if (!item || typeof item !== "object" || item.type !== "reasoning") return false;
+  if (typeof item.id === "string" && FOREIGN_REASONING_UUID_ID.test(item.id)) return true;
+  if (typeof item.encrypted_content === "string" && item.encrypted_content.length > 0) {
+    return !item.encrypted_content.startsWith(OPENAI_ENCRYPTED_REASONING_PREFIX);
+  }
+  return false;
+}
+
+function dropForeignReasoningItems(body) {
+  if (!Array.isArray(body.input)) return;
+  body.input = body.input.filter((item) => !isForeignReasoningItem(item));
+}
+
 // Hosted tool types that Codex/OpenAI Responses executes server-side
 const CODEX_HOSTED_TOOL_TYPES = new Set([
   "image_generation", "web_search", "web_search_preview", "file_search",
@@ -455,6 +476,8 @@ export class CodexExecutor extends BaseExecutor {
 
     // Keep system prompts in body.input as role=developer so they stay in the cacheable prefix
     convertSystemToDeveloperRole(body);
+    // Drop reasoning items minted by non-OpenAI Responses providers (Grok/xAI) before Codex tries to decrypt them
+    dropForeignReasoningItems(body);
     // Strip server-generated item IDs (rs_/fc_/resp_/msg_) — Codex /responses can't resolve when store=false
     stripStoredItemReferences(body, responsesLite);
     // Flatten function tools + drop unsupported types
