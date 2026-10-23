@@ -85,4 +85,36 @@ describe("model catalog v4 transform", () => {
     });
     expect(result.uniqueCanonicalBasename["gpt-owner"]).toBe("openai/gpt-owner");
   });
+
+  it("does not drop uniqueCanonicalBasename when a third-party gateway omits canonical_model_id", () => {
+    const result = build({
+      openai: {
+        models: {
+          "gpt-5-mini": {
+            name: "GPT-5 Mini",
+            cost: { input: 0.25, output: 2, cache_read: 0.025 },
+          },
+        },
+      },
+      openrouter: {
+        models: {
+          "openai/gpt-5-mini": {
+            name: "OpenAI: GPT-5 Mini",
+            canonical_model_id: "openai/gpt-5-mini",
+            cost: { input: 0.25, output: 2, cache_read: 0.025 },
+          },
+        },
+      },
+      "302ai": {
+        models: {
+          "gpt-5-mini": {
+            name: "gpt-5-mini",
+            cost: { input: 0.25, output: 2 },
+          },
+        },
+      },
+    }, []);
+    expect(result.uniqueCanonicalBasename["gpt-5-mini"]).toBe("openai/gpt-5-mini");
+    expect(result.canonicalPricing["openai/gpt-5-mini"]).toMatchObject({ input: 0.25, output: 2, cached: 0.025 });
+  });
 });

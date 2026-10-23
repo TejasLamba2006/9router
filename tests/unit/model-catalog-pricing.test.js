@@ -57,6 +57,10 @@ describe("models.dev pricing reader", () => {
       rates: { input: 2, output: 8 },
       source: "models.dev-canonical",
     });
+    expect(catalog.getCatalogPricing("openai-compatible-chat-custom", "gpt-x-2025-08-07")).toMatchObject({
+      rates: { input: 2, output: 8 },
+      source: "models.dev-canonical",
+    });
   });
 
   it("uses canonical reported metadata for an unknown compatible provider", () => {

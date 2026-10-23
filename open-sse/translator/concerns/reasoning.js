@@ -7,6 +7,13 @@ export function reasoningDelta(text, withRole = false) {
     : { reasoning_content: text };
 }
 
+// Lazily add the canonical OpenAI reasoning field when an upstream streams the
+// vendor aliases instead: `reasoning` (string) and `reasoning_details[]`
+// (OpenRouter-style lanes). Only ever ADDS the field — the aliases stay intact
+// for clients that read them — and never touches a delta that already carries
+// reasoning_content. Without this, OpenAI-shaped clients see no thinking at all:
+// reasoningDelta()/the SSE→JSON aggregator/usage tracking all read
+// reasoning_content.
 export function liftReasoningAliases(delta) {
   if (!delta || typeof delta !== "object") return delta;
   if (typeof delta.reasoning_content === "string" && delta.reasoning_content) return delta;

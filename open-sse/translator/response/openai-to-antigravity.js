@@ -28,7 +28,10 @@ export function openaiToAntigravityResponse(chunk, state) {
 
   const parts = [];
 
-  // Thinking/reasoning → thought part
+  // Thinking/reasoning → thought part (reasoning_content, plus the vendor
+  // aliases `reasoning` / `reasoning_details[]` some lanes — OpenCode Free's
+  // MiMo route — stream instead; same extraction the Claude/Responses
+  // translators use, so an alias-only chunk is not dropped as empty)
   const reasoningText = extractReasoningText(delta);
   if (reasoningText) {
     parts.push({ thought: true, text: reasoningText });

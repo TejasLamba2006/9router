@@ -16,8 +16,12 @@ const {
   signatureFamily,
 } = await import("../../open-sse/services/thoughtSignatureStore.js");
 const { openaiToAntigravityRequest } = await import("../../open-sse/translator/request/openai-to-gemini.js");
+const { openaiToVertexRequest } = await import("../../open-sse/translator/request/openai-to-vertex.js");
 const { geminiToOpenAIResponse } = await import("../../open-sse/translator/response/gemini-to-openai.js");
-const { DEFAULT_THINKING_GEMINI_CLI_SIGNATURE } = await import("../../open-sse/config/defaultThinkingSignature.js");
+const {
+  DEFAULT_THINKING_GEMINI_CLI_SIGNATURE,
+  DEFAULT_THINKING_VERTEX_SIGNATURE,
+} = await import("../../open-sse/config/defaultThinkingSignature.js");
 
 let n = 0;
 const uid = (p) => `${p}_${Date.now()}_${n++}`;
@@ -100,5 +104,20 @@ describe("antigravity thought signatures are scoped to the model family", () => 
     storeGeminiThoughtSignature(call, "GEMINI_SIG", null, "gemini-3.8-flash-tiered");
     const req = openaiToAntigravityRequest("gemini-3.8-flash-tiered", toolHistory(call), true);
     expect(functionCallSignatures(req)).toEqual(["GEMINI_SIG"]);
+  });
+
+  it("openaiToVertexRequest preserves cached Gemini thoughtSignatures instead of overwriting them", () => {
+    const call = uid("call_vtx");
+    storeGeminiThoughtSignature(call, "REAL_VERTEX_SIG", "sess_vtx", "gemini-4-argon");
+    const req = openaiToVertexRequest("gemini-4-argon", toolHistory(call), true, { _clientSessionId: "sess_vtx" });
+    const sigs = req.contents.flatMap((c) => c.parts || []).filter((p) => p.functionCall).map((p) => p.thoughtSignature);
+    expect(sigs).toEqual(["REAL_VERTEX_SIG"]);
+  });
+
+  it("openaiToVertexRequest uses clean DEFAULT_THINKING_VERTEX_SIGNATURE when uncached", () => {
+    const call = uid("call_vtx_miss");
+    const req = openaiToVertexRequest("gemini-4-argon", toolHistory(call), true, { _clientSessionId: "sess_vtx" });
+    const sigs = req.contents.flatMap((c) => c.parts || []).filter((p) => p.functionCall).map((p) => p.thoughtSignature);
+    expect(sigs).toEqual([DEFAULT_THINKING_VERTEX_SIGNATURE]);
   });
 });
