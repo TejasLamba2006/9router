@@ -8,8 +8,9 @@ import ProviderDisplayModeControl from "./ProviderDisplayModeControl";
 
 function SearchInput({ value, onChange, placeholder, icon, label }) {
   return (
-    <div className="relative min-w-[180px] flex-1">
-      <span className="material-symbols-outlined pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-[16px] text-text-muted">
+    // icon + input are flex siblings inside the bordered box: they cannot overlap
+    <div className="flex h-8 min-w-[180px] flex-1 items-center gap-2 rounded-lg border border-black/10 bg-black/[0.02] px-2.5 focus-within:border-primary/50 dark:border-white/10 dark:bg-white/[0.03]">
+      <span className="material-symbols-outlined pointer-events-none flex size-4 shrink-0 items-center justify-center text-[16px] leading-none text-text-muted">
         {icon}
       </span>
       <input
@@ -18,16 +19,16 @@ function SearchInput({ value, onChange, placeholder, icon, label }) {
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         aria-label={label}
-        className="h-8 w-full rounded-lg border border-black/10 bg-black/[0.02] pl-7 pr-7 text-xs text-text-primary outline-none focus:border-primary/50 dark:border-white/10 dark:bg-white/[0.03]"
+        className="h-full min-w-0 flex-1 bg-transparent p-0 text-xs text-text-primary outline-none"
       />
       {value && (
         <button
           type="button"
           onClick={() => onChange("")}
           aria-label={`Clear ${label}`}
-          className="absolute right-1.5 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-main"
+          className="flex shrink-0 items-center text-text-muted hover:text-text-main"
         >
-          <span className="material-symbols-outlined text-[14px]">close</span>
+          <span className="material-symbols-outlined text-[14px] leading-none">close</span>
         </button>
       )}
     </div>
