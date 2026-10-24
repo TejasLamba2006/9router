@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="https://raw.githubusercontent.com/TejasLamba2006/9router/main/public/banner.png" alt="Busbar" width="100%"/>
+  <img src="https://raw.githubusercontent.com/TejasLamba2006/busbar/main/public/banner.png" alt="Busbar" width="100%"/>
 
   # Busbar
 
