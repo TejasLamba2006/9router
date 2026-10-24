@@ -6,11 +6,16 @@ import { STATUS_FILTER_OPTIONS } from "../utils";
 import { CATEGORY_FILTERS, MEDIA_FILTERS } from "../providerFiltering";
 import ProviderDisplayModeControl from "./ProviderDisplayModeControl";
 
+// .material-symbols-outlined is unlayered CSS (font-size:24px) and beats Tailwind utilities, so size inline.
+const icon = (n) => ({ fontSize: n, lineHeight: `${n}px`, width: n, height: n, display: "flex", alignItems: "center", justifyContent: "center" });
+const ICON16 = icon(16);
+const ICON14 = icon(14);
+
 function SearchInput({ value, onChange, placeholder, icon, label }) {
   return (
     // icon + input are flex siblings inside the bordered box: they cannot overlap
     <div className="flex h-8 min-w-[180px] flex-1 items-center gap-2 rounded-lg border border-black/10 bg-black/[0.02] px-2.5 focus-within:border-primary/50 dark:border-white/10 dark:bg-white/[0.03]">
-      <span className="material-symbols-outlined pointer-events-none flex size-4 shrink-0 items-center justify-center text-[16px] leading-none text-text-muted">
+      <span style={ICON16} className="material-symbols-outlined pointer-events-none shrink-0 text-text-muted">
         {icon}
       </span>
       <input
@@ -28,7 +33,7 @@ function SearchInput({ value, onChange, placeholder, icon, label }) {
           aria-label={`Clear ${label}`}
           className="flex shrink-0 items-center text-text-muted hover:text-text-main"
         >
-          <span className="material-symbols-outlined text-[14px] leading-none">close</span>
+          <span style={ICON14} className="material-symbols-outlined">close</span>
         </button>
       )}
     </div>
@@ -147,7 +152,7 @@ export default function ProviderSummaryCard({
                   : "border-border text-text-muted hover:border-primary/40 hover:text-text-main"
               }`}
             >
-              <span className="material-symbols-outlined text-[14px]">{m.icon}</span>
+              <span style={ICON14} className="material-symbols-outlined">{m.icon}</span>
               {m.label}
             </button>
           );
@@ -158,7 +163,7 @@ export default function ProviderSummaryCard({
             onClick={() => onMediaChange("")}
             className="inline-flex h-7 items-center gap-1 rounded-full px-2 text-xs text-text-muted hover:text-text-main"
           >
-            <span className="material-symbols-outlined text-[14px]">close</span>
+            <span style={ICON14} className="material-symbols-outlined">close</span>
             Clear
           </button>
         )}
