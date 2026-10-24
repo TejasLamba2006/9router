@@ -1,0 +1,64 @@
+<svg width="1280" height="640" viewBox="0 0 1280 640" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" stroke="#1C1D20" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <rect width="1280" height="640" fill="#0C0D0E"/>
+  <rect width="1280" height="640" fill="url(#grid)"/>
+
+  <!-- frame + corner ticks -->
+  <rect x="32.5" y="32.5" width="1215" height="575" stroke="#2A2B2F"/>
+  <path d="M32 48V32H48M1232 32H1248V48M1248 592V608H1232M48 608H32V592" stroke="#FF5A1F" stroke-width="2"/>
+
+  <!-- mark (32-grid x6) -->
+  <g transform="translate(96 160) scale(6)">
+    <rect width="32" height="32" rx="6" fill="#17181A" stroke="#2A2B2F" stroke-width="0.17"/>
+    <path d="M6 10H11M6 16H11M6 22H11" stroke="#EDEDEA" stroke-width="2"/>
+    <rect x="3" y="9" width="2" height="2" fill="#EDEDEA"/>
+    <rect x="3" y="15" width="2" height="2" fill="#EDEDEA"/>
+    <rect x="3" y="21" width="2" height="2" fill="#EDEDEA"/>
+    <path d="M11 5L21 9V23L11 27Z" fill="#FF5A1F"/>
+    <path d="M12.75 21.5V11.5H14.25L16 14.6L17.75 11.5H19.25V21.5H17.75V14.6L16 17.7L14.25 14.6V21.5Z" fill="#17181A"/>
+    <path d="M21 16H26" stroke="#FF5A1F" stroke-width="2"/>
+    <rect x="26" y="14.5" width="3" height="3" fill="#FF5A1F"/>
+  </g>
+
+  <!-- wordmark -->
+  <text x="96" y="430" font-family="'JetBrains Mono', Consolas, 'Courier New', monospace" font-size="88" font-weight="700" letter-spacing="6" fill="#EDEDEA">MODELMUX</text>
+  <text x="100" y="482" font-family="'JetBrains Mono', Consolas, 'Courier New', monospace" font-size="28" letter-spacing="1" fill="#9A9DA3">291 Providers <tspan fill="#FF5A1F">-&gt;</tspan> 1 Endpoint</text>
+  <text x="100" y="552" font-family="'JetBrains Mono', Consolas, 'Courier New', monospace" font-size="18" letter-spacing="2" fill="#686B71">$ npm i -g modelmux   //   LOCAL LLM GATEWAY   //   :20128/v1</text>
+
+  <!-- schematic: N inputs -> MUX -> 1 output -->
+  <g font-family="'JetBrains Mono', Consolas, 'Courier New', monospace" font-size="14" letter-spacing="1">
+    <text x="704" y="128" fill="#686B71">IN[0..290]</text>
+    <g stroke="#3A3B40" stroke-width="2">
+      <path d="M704 160H880M704 192H880M704 224H880M704 256H880M704 288H880M704 320H880M704 352H880M704 384H880M704 416H880"/>
+    </g>
+    <g fill="#EDEDEA">
+      <rect x="696" y="156" width="8" height="8"/><rect x="696" y="188" width="8" height="8"/>
+      <rect x="696" y="220" width="8" height="8"/><rect x="696" y="252" width="8" height="8"/>
+      <rect x="696" y="284" width="8" height="8"/><rect x="696" y="316" width="8" height="8"/>
+      <rect x="696" y="348" width="8" height="8"/><rect x="696" y="380" width="8" height="8"/>
+      <rect x="696" y="412" width="8" height="8"/>
+    </g>
+    <!-- active channel -->
+    <path d="M704 224H880" stroke="#EDEDEA" stroke-width="2"/>
+    <!-- mux block -->
+    <path d="M880 112L1024 176V400L880 464Z" fill="#17181A" stroke="#FF5A1F" stroke-width="2"/>
+    <path d="M880 224L1024 288" stroke="#FF5A1F" stroke-width="2" stroke-dasharray="6 6"/>
+    <text x="916" y="300" fill="#FF5A1F" font-size="22" font-weight="700" letter-spacing="4">MUX</text>
+    <!-- select bus -->
+    <path d="M952 432V512" stroke="#3A3B40" stroke-width="2"/>
+    <path d="M944 488L960 472" stroke="#3A3B40" stroke-width="2"/>
+    <text x="968" y="508" fill="#686B71">SEL[9]</text>
+    <!-- output -->
+    <path d="M1024 288H1168" stroke="#FF5A1F" stroke-width="4"/>
+    <rect x="1168" y="278" width="20" height="20" fill="#FF5A1F"/>
+    <text x="1104" y="268" fill="#9A9DA3">OUT</text>
+    <text x="1144" y="328" fill="#EDEDEA">/v1</text>
+    <!-- status LED -->
+    <rect x="1168" y="96" width="8" height="8" fill="#00E599"/>
+    <text x="1112" y="104" fill="#686B71">PWR</text>
+  </g>
+</svg>

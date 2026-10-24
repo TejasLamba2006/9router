@@ -1,8 +1,12 @@
 {
-  "name": "9router-app",
-  "version": "0.5.109",
-  "description": "9Router web dashboard",
+  "name": "modelmux-app",
+  "version": "1.0.0",
+  "description": "ModelMux web dashboard and gateway",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TejasLamba2006/modelmux.git"
+  },
   "scripts": {
     "dev": "next dev --port 20127",
     "dev:webpack": "next dev --webpack --port 20127",

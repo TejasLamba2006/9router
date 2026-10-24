@@ -1,8 +1,14 @@
 {
-  "name": "9router",
-  "version": "0.5.109",
-  "description": "9Router CLI - Start and manage 9Router server",
+  "name": "modelmux",
+  "version": "1.0.0",
+  "description": "Fast, zero-bloat local LLM multiplexer and gateway for 290+ providers",
+  "author": "TejasLamba2006",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TejasLamba2006/modelmux.git"
+  },
   "bin": {
+    "modelmux": "./cli.js",
     "9router": "./cli.js"
   },
   "files": [
@@ -37,11 +43,13 @@
     "node": ">=18.0.0"
   },
   "keywords": [
-    "9router",
-    "cli",
+    "modelmux",
+    "llm",
+    "gateway",
     "proxy",
-    "ai",
-    "api"
+    "openai",
+    "anthropic",
+    "gemini"
   ],
   "license": "MIT",
   "devDependencies": {
