@@ -103,7 +103,7 @@ export async function runModelProbe({ provider, model, kind = "llm", connectionI
       body: {
         ...(body || {
           messages: [{ role: "user", content: "Reply with exactly OK." }],
-          max_tokens: 32,
+          max_tokens: 1024, // reasoning models burn tokens on hidden CoT; 32 starves the answer
           stream: false,
         }),
         model: `${resolved.provider}/${resolved.model}`,
@@ -136,7 +136,9 @@ export async function runModelProbe({ provider, model, kind = "llm", connectionI
 
     const payload = await result.response.json();
     const evidence = extractProbeEvidence(payload);
-    const ok = Boolean(evidence.text.trim() || evidence.toolCalls.length || evidence.reasoning);
+    // length-capped with generated-but-hidden reasoning tokens = provider is alive
+    const hiddenReasoning = evidence.finishReason === "length" && Number(evidence.usage?.completion_tokens) > 0;
+    const ok = Boolean(evidence.text.trim() || evidence.toolCalls.length || evidence.reasoning || hiddenReasoning);
     const classification = classifyProbeResult({ ok, status: result.response.status, finishReason: evidence.finishReason });
     if (!ok) {
       emitRequestError({

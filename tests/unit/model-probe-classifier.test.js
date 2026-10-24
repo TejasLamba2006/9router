@@ -30,3 +30,13 @@ describe("model probe classification", () => {
     expect(message).toContain("[REDACTED]");
   });
 });
+
+import { extractProbeEvidence } from "../../src/lib/modelProbe.js";
+describe("hidden-reasoning length-capped response", () => {
+  it("exposes usage.completion_tokens so probe can soft-pass", () => {
+    const e = extractProbeEvidence({ choices: [{ finish_reason: "length", message: { content: null } }], usage: { completion_tokens: 32 } });
+    expect(e.text).toBe("");
+    expect(e.finishReason).toBe("length");
+    expect(Number(e.usage.completion_tokens)).toBeGreaterThan(0);
+  });
+});

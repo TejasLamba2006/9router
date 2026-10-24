@@ -159,7 +159,7 @@ export async function pingModelByKind(model, kind, baseUrl = `http://127.0.0.1:$
       stream: false,
       messages: [{ role: "user", content: "hi" }],
     }),
-    signal: AbortSignal.timeout(15000),
+    signal: AbortSignal.timeout(30000),
   });
   const latencyMs = Date.now() - start;
 
@@ -212,7 +212,8 @@ export async function pingModelByKind(model, kind, baseUrl = `http://127.0.0.1:$
     firstChoice.message?.reasoning ||
     firstChoice.message?.reasoning_content ||
     firstChoice.message?.thinking ||
-    firstChoice.message?.thinking_content;
+    firstChoice.message?.thinking_content ||
+    Number(parsed?.usage?.completion_tokens) > 0;
   const contentEmpty = !String(firstChoice.message?.content || "").trim();
   if (hasChoices && firstChoice.finish_reason === "length" && contentEmpty && hasReasoning) {
     return { ok: true, latencyMs, error: null, status: res.status, note: "reasoning-only response (length-limited)" };
