@@ -1,6 +1,6 @@
 {
   "name": "busbar-ai",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Fast, zero-bloat local LLM gateway and multiplexer for 290+ providers",
   "author": "TejasLamba2006",
   "repository": {

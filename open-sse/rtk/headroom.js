@@ -2,6 +2,7 @@ import { claudeToOpenAIRequest } from "../translator/request/claude-to-openai.js
 import { openaiToClaudeRequest } from "../translator/request/openai-to-claude.js";
 import { FORMATS } from "../translator/formats.js";
 import { ROLE, OPENAI_BLOCK, COMMANDCODE_BLOCK, RESPONSES_ITEM } from "../translator/schema/index.js";
+import { buildToolNameMap, shouldSkipResult, forEachToolResult } from "./guard.js";
 import { HEADROOM_TOOL_OUTPUT_MAX_DEPTH } from "./constants.js";
 import {
   openaiResponsesToOpenAIRequest,
@@ -356,7 +357,35 @@ async function callCompress(url, messages, model, timeoutMs, compressUserMessage
 // Compress request body via Headroom proxy. Fail-open: returns null on any error.
 // /v1/compress only understands OpenAI shape, so Claude bodies are translated
 // to OpenAI, compressed, then translated back using 9Router's own translators.
-export async function compressWithHeadroom(body, { enabled, url, model, format, compressUserMessages, timeoutMs = DEFAULT_TIMEOUT_MS, diagnostics = null } = {}) {
+// Snapshot protected-tool and error results so they can be restored verbatim
+// after Headroom returns (it must never summarize Read/Edit/Grep or errors).
+function snapshotProtected(body) {
+  const names = buildToolNameMap(body);
+  const saved = new Map();
+  forEachToolResult(body, (holder, key, id) => {
+    if (id && shouldSkipResult(holder, id, holder[key], names)) {
+      saved.set(id, structuredClone(holder[key]));
+    }
+  });
+  return saved;
+}
+
+function restoreProtected(body, saved) {
+  if (!saved.size) return;
+  forEachToolResult(body, (holder, key, id) => {
+    if (saved.has(id)) holder[key] = structuredClone(saved.get(id));
+  });
+}
+
+export async function compressWithHeadroom(body, opts = {}) {
+  let saved;
+  try { saved = snapshotProtected(body); } catch { saved = new Map(); }
+  const data = await compressWithHeadroomInner(body, opts);
+  if (data) { try { restoreProtected(body, saved); } catch { /* fail-open */ } }
+  return data;
+}
+
+async function compressWithHeadroomInner(body, { enabled, url, model, format, compressUserMessages, timeoutMs = DEFAULT_TIMEOUT_MS, diagnostics = null } = {}) {
   timeoutMs = normalizeTimeout(timeoutMs);
   if (!enabled) {
     setDiagnostic(diagnostics, "disabled");

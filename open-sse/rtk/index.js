@@ -3,6 +3,7 @@
 import { RAW_CAP, MIN_COMPRESS_SIZE } from "./constants.js";
 import { autoDetectFilter } from "./autodetect.js";
 import { safeApply } from "./applyFilter.js";
+import { buildToolNameMap, shouldSkipResult } from "./guard.js";
 
 // Compress tool_result content in-place. Returns stats or null if disabled/failed.
 export function compressMessages(body, enabled) {
@@ -21,13 +22,15 @@ export function compressMessages(body, enabled) {
   if (!items) return null;
 
   const stats = { bytesBefore: 0, bytesAfter: 0, hits: [] };
+  const names = buildToolNameMap(body);
   try {
     for (let i = 0; i < items.length; i++) {
       const msg = items[i];
       if (!msg) continue;
 
       // Shape 4: OpenAI Responses — top-level { type:"function_call_output", output: string | [{type:"input_text", text}] }
-      if (msg.type === "function_call_output") {
+      if (msg.type === "function_call_output" || msg.type === "custom_tool_call_output") {
+        if (shouldSkipResult(msg, msg.call_id || msg.id, msg.output, names)) continue;
         if (typeof msg.output === "string") {
           msg.output = compressText(msg.output, stats, "openai-responses-string");
         } else if (Array.isArray(msg.output)) {
@@ -42,6 +45,8 @@ export function compressMessages(body, enabled) {
       }
 
       // Shape 1: OpenAI tool message — { role:"tool", content: "string" }
+      if (msg.role === "tool" && shouldSkipResult(msg, msg.tool_call_id, msg.content, names)) continue;
+
       if (msg.role === "tool" && typeof msg.content === "string") {
         msg.content = compressText(msg.content, stats, "openai-tool");
         continue;
@@ -64,7 +69,7 @@ export function compressMessages(body, enabled) {
       for (let j = 0; j < msg.content.length; j++) {
         const block = msg.content[j];
         if (!block || block.type !== "tool_result") continue;
-        if (block.is_error === true) continue; // preserve error traces
+        if (shouldSkipResult(block, block.tool_use_id, block.content, names)) continue; // protected tool or error trace
 
         if (typeof block.content === "string") {
           // Shape 2: claude string form

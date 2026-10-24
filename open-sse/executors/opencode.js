@@ -390,7 +390,29 @@ export class OpenCodeExecutor extends BaseExecutor {
   }
 
   async execute(args) {
-    return super.execute({ ...args, credentials: this.prepareRequestCredentials(args) });
+    const credentials = this.prepareRequestCredentials(args);
+    const result = await super.execute({ ...args, credentials });
+    const status = result?.response?.status;
+    if (status !== 403 && status !== 429) return result;
+    let text = "";
+    try { text = (await result.response.clone().text()).toLowerCase(); } catch { return result; }
+    const blocked = (status === 403 && text.includes("freetiererror"))
+      || (status === 429 && text.includes("abusive traffic from this ip"));
+    if (!blocked) return result;
+
+    // Replay once through the next proxy candidate, else direct egress.
+    const po = args.proxyOptions;
+    const [next, ...rest] = Array.isArray(po?.proxyCandidates) ? po.proxyCandidates : [];
+    let retryOptions;
+    if (next) retryOptions = { ...next, proxyCandidates: rest };
+    else if (po?.connectionProxyEnabled) retryOptions = { ...po, connectionProxyEnabled: false, proxyCandidates: [] };
+    else return result;
+    args.log?.info?.("PROXY", `OPENCODE | ${status} blocked, replaying via ${next ? "next proxy" : "direct egress"}`);
+    try {
+      return await super.execute({ ...args, credentials, proxyOptions: retryOptions });
+    } catch {
+      return result;
+    }
   }
 
   // Free tier moved from /zen/v1 to /inference/v1 (OpenCode v2); /zen/v1 now

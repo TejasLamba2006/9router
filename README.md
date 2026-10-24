@@ -46,6 +46,7 @@ Busbar keeps 9Router's footprint and ports the useful parts of OmniRoute without
 5. **Per-connection proxy pool rotation and local direct toggle.** Rotate requests across Cloudflare workers, SOCKS5/HTTP proxies, and your own IP (`__local__`), per connection or per retry. Timed-out relays are skipped without locking the upstream account.
 6. **Streaming empty-turn retry and thinking-signature recovery.** The first 128 KB of every upstream SSE stream is cloned and checked, so empty or aborted turns retry before bytes reach the client. Claude 5/5.5 `CAIS` protobuf signatures are validated, Vertex `thoughtSignature` poisoning is fixed, and invalid historical thinking signatures are recovered automatically.
 7. **`models.dev` auto-pricing.** 4-rate pricing (input, output, cache read, cache write/reasoning) across 2,180+ model basenames, including custom Azure and OpenAI-compatible deployments.
+8. **RTK and Headroom protected-tools guard.** Output from `Read`, `Edit`, `Write`, `Grep`, `NotebookEdit`, `MultiEdit`, `patch`, `apply_patch`, and `anchor`, plus any error result, is never compressed or summarized, so line numbers and exact strings that `Edit` depends on stay intact. OpenCode `FreeTierError` and abuse blocks replay once through the next proxy or direct egress.
 
 ## Installation and quick start
 

@@ -58,6 +58,10 @@ const COOLDOWN = {
  */
 export const ERROR_RULES = [
   // --- Text-based rules (checked first, order = priority) ---
+  // OpenCode free tier: short transient cooldowns so one proxy/IP hiccup does not lock the model for minutes.
+  { text: "abusive traffic",          cooldownMs: 30000 },
+  { text: "freeusagelimiterror",      cooldownMs: 60000 },
+  { text: "freetiererror",            cooldownMs: 15000 },
   { provider: "codex", text: "model is not supported when using codex with a chatgpt account", cooldownMs: MAX_RATE_LIMIT_COOLDOWN_MS },
   // Intl gateway blocks affect the account/IP, so let the connection back off.
   { provider: "codebuddy-intl", text: "request illegal", backoff: true },
