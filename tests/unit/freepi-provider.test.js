@@ -8,7 +8,7 @@ vi.mock("open-sse/utils/proxyFetch.js", async (orig) => ({
 
 const { PROVIDERS } = await import("open-sse/config/providers.js");
 const { AI_PROVIDERS, ALIAS_TO_ID } = await import("@/shared/constants/providers.js");
-const { FreepiExecutor } = await import("open-sse/executors/freepi.js");
+const { FreepiExecutor, resetFreepiAdsForTests } = await import("open-sse/executors/freepi.js");
 const { resolveFreepiModels, getCachedFreepiVersion, resetFreepiCacheForTests } = await import(
   "open-sse/services/freepiModels.js"
 );
@@ -28,6 +28,7 @@ const json = (body, status = 200) =>
 let fetchMock;
 beforeEach(() => {
   resetFreepiCacheForTests();
+  resetFreepiAdsForTests();
   proxyFetchMock.mockReset();
   fetchMock = vi.fn(async (url) => (String(url).endsWith("/client-version") ? json(CV) : json({ ok: true })));
   vi.stubGlobal("fetch", fetchMock);
@@ -82,5 +83,45 @@ describe("FreepiExecutor", () => {
     const reset = fetchMock.mock.calls.find((c) => String(c[0]).endsWith("/session/reset"));
     expect(reset[1].method).toBe("POST");
     expect(reset[1].headers.Authorization).toBe("Bearer jwt-abc");
+  });
+
+  it("pings /ads/next (banner+inline) and /ads/impression before first chat, throttled", async () => {
+    const calls = [];
+    fetchMock.mockImplementation(async (url, init) => {
+      const u = String(url);
+      calls.push([u, init?.method || "GET", init?.headers]);
+      if (u.includes("/ads/next")) return json({ ad_id: "a1", click_token: "t1", source: "own" });
+      if (u.endsWith("/client-version")) return json(CV);
+      return json({ ok: true });
+    });
+    proxyFetchMock.mockResolvedValue(json({ ok: true }));
+    const ex = new FreepiExecutor();
+    await ex.execute(args);
+    await ex.execute(args);
+    const ads = calls.filter(([u]) => u.includes("/ads/"));
+    expect(ads.map(([u, m]) => `${m} ${u.replace("https://api.freepi.ai", "")}`)).toEqual([
+      "GET /ads/next?slot=banner",
+      "POST /ads/impression",
+      "GET /ads/next?slot=inline",
+      "POST /ads/impression",
+    ]);
+    expect(ads[0][2].Authorization).toBe("Bearer jwt-abc");
+    expect(ads[0][2]["x-session-id"]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(ads[0][2]["x-client-version"]).toBe("0.4.10");
+  });
+
+  it("re-pings ads and retries once on 403 ads_required", async () => {
+    const urls = [];
+    fetchMock.mockImplementation(async (url) => {
+      urls.push(String(url));
+      return String(url).endsWith("/client-version") ? json(CV) : json({}, 204);
+    });
+    proxyFetchMock
+      .mockResolvedValueOnce(json({ code: "ads_required", message: "ads aren't displaying" }, 403))
+      .mockResolvedValueOnce(json({ ok: true }));
+    const { response } = await new FreepiExecutor().execute(args);
+    expect(response.status).toBe(200);
+    expect(proxyFetchMock).toHaveBeenCalledTimes(2);
+    expect(urls.filter((u) => u.includes("/ads/next")).length).toBe(4); // preflight + forced
   });
 });
