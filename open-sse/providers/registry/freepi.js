@@ -1,0 +1,68 @@
+/**
+ * FreePi (freepi.ai): ad-supported free tier, OpenAI-compatible gateway.
+ * Auth: GitHub device code via api.freepi.ai/auth/*, JWT used as Bearer.
+ * Model list is also resolved live from /client-version (see freepiModels.js).
+ */
+export default {
+  id: "freepi",
+  priority: 185,
+  alias: "freepi",
+  aliases: ["fp", "free-pi"],
+  uiAlias: "fp",
+  hasFree: true,
+  display: {
+    name: "FreePi (Ad-Supported Free Tier)",
+    icon: "terminal",
+    color: "#10B981",
+    textIcon: "FP",
+    website: "https://freepi.ai",
+    notice: {
+      text: "Sign in with GitHub via Device Code (or paste ~/.free-pi/agent/credentials.json token). Includes daily free USD allowance for Claude 5.5, Gemini 4 Argon, GPT 6.1 Sol, Kimi K3.1 Pro, DeepSeek V4, and 27 models.",
+    },
+  },
+  category: "oauth",
+  authModes: ["oauth", "apikey"],
+  hasOAuth: true,
+  transport: {
+    baseUrl: "https://api.freepi.ai/v1/chat/completions",
+    format: "openai",
+    usage: { url: "https://api.freepi.ai/me" },
+  },
+  models: [
+    { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash" },
+    { id: "abliterated-large-flash", name: "Abliterated Large Flash" },
+    { id: "abliterated-large-v2", name: "Abliterated Large V2" },
+    { id: "claude-haiku-5.5", name: "Claude Haiku 5.5" },
+    { id: "claude-sonnet-5.5", name: "Claude Sonnet 5.5" },
+    { id: "deepseek-v4.1-flash", name: "DeepSeek V4.1 Flash" },
+    { id: "deepseek-v4.1-flash-abliterated", name: "DeepSeek V4.1 Flash Abliterated" },
+    { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro" },
+    { id: "gemini-4-argon", name: "Gemini 4 Argon" },
+    { id: "gemini-4-argon-flex", name: "Gemini 4 Argon Flex" },
+    { id: "gemma-4-uncensored", name: "Gemma 4 Uncensored" },
+    { id: "glm-4.7-flash-heretic", name: "GLM 4.7 Flash Heretic" },
+    { id: "glm-5.3-flash", name: "GLM 5.3 Flash" },
+    { id: "gpt-6.1-sol", name: "GPT-6.1 Sol" },
+    { id: "gpt-6.1-sol-flex", name: "GPT-6.1 Sol Flex" },
+    { id: "gpt-6-luna", name: "GPT-6 Luna" },
+    { id: "gpt-6-luna-flex", name: "GPT-6 Luna Flex" },
+    { id: "gpt-oss-120b-speed", name: "GPT-OSS 120B" },
+    { id: "kimi-k3.1-pro", name: "Kimi K3.1 Pro" },
+    { id: "laguna-s-2.1", name: "Laguna S 2.1 (Poolside)" },
+    { id: "mimo-v2.6-flash", name: "MiMo V2.6 Flash (Xiaomi)" },
+    { id: "muse-spark-1.3-contributor", name: "Muse Spark 1.3 Contributor" },
+    { id: "muse-spark-open", name: "Muse Spark Open (Meta)" },
+    { id: "qwen3.5-35b-darkbloom", name: "Qwen3.5 35B (Darkbloom)" },
+    { id: "qwen3.6-plus-uncensored", name: "Qwen 3.6 Plus Uncensored" },
+    { id: "solar-pro-4", name: "Solar Pro 4" },
+    { id: "uncensored-1.2", name: "Uncensored 1.2" },
+  ],
+  features: { usage: true, usageApikey: true },
+  oauth: {
+    deviceCodeUrl: "https://api.freepi.ai/auth/github/device",
+    tokenUrl: "https://api.freepi.ai/auth/token",
+    consentUrl: "https://api.freepi.ai/auth/consent",
+    meUrl: "https://api.freepi.ai/me",
+    consentVersion: "2026-03-01",
+  },
+};

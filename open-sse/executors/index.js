@@ -15,6 +15,7 @@ import { OpenCodeGoExecutor } from "./opencode-go.js";
 import { OpenCodeZenExecutor } from "./opencode-zen.js";
 import { GrokWebExecutor } from "./grok-web.js";
 import { GrokCliExecutor } from "./grok-cli.js";
+import { FreepiExecutor } from "./freepi.js";
 import { PerplexityWebExecutor } from "./perplexity-web.js";
 import { DeepSeekWebExecutor } from "./deepseek-web.js";
 import { GeminiWebExecutor } from "./gemini-web.js";
@@ -55,6 +56,8 @@ const executors = {
   "opencode-go": new OpenCodeGoExecutor(),
   "opencode-zen": new OpenCodeZenExecutor(),
   "grok-web": new GrokWebExecutor(),
+  freepi: new FreepiExecutor(),
+  fp: new FreepiExecutor(), // Alias
   "grok-cli": new GrokCliExecutor(),
   gcli: new GrokCliExecutor(), // Alias
   gb: new GrokCliExecutor(), // Alias (Grok Build)
@@ -120,6 +123,7 @@ export { OpenCodeGoExecutor } from "./opencode-go.js";
 export { OpenCodeZenExecutor } from "./opencode-zen.js";
 export { GrokWebExecutor } from "./grok-web.js";
 export { GrokCliExecutor } from "./grok-cli.js";
+export { FreepiExecutor } from "./freepi.js";
 export { PerplexityWebExecutor } from "./perplexity-web.js";
 export { DeepSeekWebExecutor } from "./deepseek-web.js";
 export { GeminiWebExecutor } from "./gemini-web.js";

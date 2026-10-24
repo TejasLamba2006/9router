@@ -8,6 +8,7 @@ import claude from "./claude.js";
 import codex from "./codex.js";
 import xai from "./xai.js";
 import grokCli from "./grok-cli.js";
+import freepi from "./freepi.js";
 import muse from "./muse.js";
 import geminiCli from "./gemini-cli.js";
 import antigravity from "./antigravity.js";
@@ -39,6 +40,7 @@ const PROVIDERS = {
   codex,
   xai,
   "grok-cli": grokCli,
+  freepi,
   muse,
   "gemini-cli": geminiCli,
   antigravity,

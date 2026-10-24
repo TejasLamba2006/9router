@@ -3,9 +3,9 @@
 
   # Busbar
 
-  **A local LLM multiplexer. One `/v1` endpoint in front of 291 providers.**
+  **A local LLM multiplexer. One `/v1` endpoint in front of 292 providers.**
 
-  In electrical engineering, a busbar is the solid copper strip that collects power from multiple sources and feeds every circuit on one common rail. Busbar does the same for 291 LLM providers on `localhost:20128/v1`.
+  In electrical engineering, a busbar is the solid copper strip that collects power from multiple sources and feeds every circuit on one common rail. Busbar does the same for 292 LLM providers on `localhost:20128/v1`.
 
   [![npm](https://img.shields.io/npm/v/busbar-ai.svg)](https://www.npmjs.com/package/busbar-ai)
   [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -13,7 +13,7 @@
 
 ## What Busbar is
 
-Busbar is a local gateway that speaks the OpenAI, Anthropic, and Gemini APIs on port `20128`. It connects 291 native providers behind one `/v1` endpoint: OAuth subscriptions, API keys, free tiers, aggregators, local models, web search, web fetch, TTS, STT, image, video, and embeddings.
+Busbar is a local gateway that speaks the OpenAI, Anthropic, and Gemini APIs on port `20128`. It connects 292 native providers behind one `/v1` endpoint: OAuth subscriptions, API keys, free tiers, aggregators, local models, web search, web fetch, TTS, STT, image, video, and embeddings.
 
 Point your tools at it, add accounts in the dashboard, and it handles format translation, model combos, multi-account fallback, token refresh, and usage tracking.
 
@@ -39,7 +39,7 @@ Stock 9Router is fast and lean, but:
 
 Busbar keeps 9Router's footprint and ports the useful parts of OmniRoute without the rest.
 
-1. **291 native providers and a filter bar.** 150+ additional providers with config-driven connection testing. The dashboard has instant search by provider or model ID, `All | Configured | Compact` views, 13 category chips, and 7 media-kind filters.
+1. **292 native providers and a filter bar.** 150+ additional providers with config-driven connection testing. The dashboard has instant search by provider or model ID, `All | Configured | Compact` views, 13 category chips, and 7 media-kind filters. Includes native `freepi` (`fp/*`): FreePi's ad-supported free tier with GitHub device-code sign-in, a daily USD allowance, and 27 models (Claude Sonnet 5.5, Gemini 4 Argon, GPT-6.1 Sol, Kimi K3.1 Pro, DeepSeek V4).
 2. **Sub-second `/v1/models` (23.4s to 1.0s).** Catalogs refresh in the background and persist in the SQLite `kv` table, so `/v1/models` never waits on the Kiro, Qoder, Copilot, or Cursor resolvers.
 3. **Native `web_search` and `web_fetch` redirect.** Claude Code's web search and fetch tools work on Gemini, DeepSeek, GLM, Codex, or any OpenAI model, routed through Exa, Brave, Tavily, Serper, or SearXNG. Includes SSRF protection and domain filtering.
 4. **Claude Code auto-permission classifier compat.** The optional `claudeClassifierCompat` setting lets non-Claude models answer Claude Code's security classifier without failing permission prompts.

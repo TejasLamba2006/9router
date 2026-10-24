@@ -125,6 +125,7 @@ const OAUTH_TEST_CONFIG = {
     },
     refreshable: false,
   },
+  freepi: { url: "https://api.freepi.ai/me", method: "GET", authHeader: "Authorization", authPrefix: "Bearer ", refreshable: false },
   // Grok CLI / Grok Build — probe /v1/user (no inference quota). Headers mirror official CLI.
   "grok-cli": {
     url: PROVIDERS["grok-cli"]?.userUrl || "https://cli-chat-proxy.grok.com/v1/user",
@@ -791,6 +792,10 @@ async function testApiKeyConnection(connection, effectiveProxy = null) {
         }, effectiveProxy);
         const valid = res.status !== 401 && res.status !== 403;
         return { valid, error: valid ? null : "Invalid API key" };
+      }
+      case "freepi": {
+        const res = await fetchWithConnectionProxy("https://api.freepi.ai/me", { headers: { Authorization: `Bearer ${connection.apiKey || connection.accessToken}` } }, effectiveProxy);
+        return { valid: res.ok, error: res.ok ? null : "Invalid or expired FreePi token" };
       }
       case "deepseek": {
         const res = await fetchWithConnectionProxy("https://api.deepseek.com/models", { headers: { Authorization: `Bearer ${connection.apiKey}` } }, effectiveProxy);
