@@ -1,23 +1,25 @@
 <div align="center">
-  <img src="./public/banner.png" alt="ModelMux" width="100%"/>
+  <img src="https://raw.githubusercontent.com/TejasLamba2006/9router/main/public/banner.png" alt="Busbar" width="100%"/>
 
-  # ModelMux
+  # Busbar
 
   **A local LLM multiplexer. One `/v1` endpoint in front of 291 providers.**
 
-  [![npm](https://img.shields.io/npm/v/modelmux.svg)](https://www.npmjs.com/package/modelmux)
+  In electrical engineering, a busbar is the solid copper strip that collects power from multiple sources and feeds every circuit on one common rail. Busbar does the same for 291 LLM providers on `localhost:20128/v1`.
+
+  [![npm](https://img.shields.io/npm/v/busbar.svg)](https://www.npmjs.com/package/busbar)
   [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 </div>
 
-## What ModelMux is
+## What Busbar is
 
-ModelMux is a local gateway that speaks the OpenAI, Anthropic, and Gemini APIs on port `20128`. It connects 291 native providers behind one `/v1` endpoint: OAuth subscriptions, API keys, free tiers, aggregators, local models, web search, web fetch, TTS, STT, image, video, and embeddings.
+Busbar is a local gateway that speaks the OpenAI, Anthropic, and Gemini APIs on port `20128`. It connects 291 native providers behind one `/v1` endpoint: OAuth subscriptions, API keys, free tiers, aggregators, local models, web search, web fetch, TTS, STT, image, video, and embeddings.
 
 Point your tools at it, add accounts in the dashboard, and it handles format translation, model combos, multi-account fallback, token refresh, and usage tracking.
 
-ModelMux is a fork of [9Router](https://github.com/decolua/9router). The on-disk data directory is still `9router`, so existing databases, API keys, and connections keep loading.
+Busbar is a fork of [9Router](https://github.com/decolua/9router). The on-disk data directory is still `9router`, so existing databases, API keys, and connections keep loading.
 
-## Why ModelMux exists
+## Why Busbar exists
 
 ### Why OmniRoute feels bloated
 
@@ -33,9 +35,9 @@ Stock 9Router is fast and lean, but:
 - No native `web_search` and `web_fetch` server-tool redirects for non-Anthropic models.
 - It lacks multi-proxy failover and stealth-model reasoning fixes.
 
-### What ModelMux adds
+### What Busbar adds
 
-ModelMux keeps 9Router's footprint and ports the useful parts of OmniRoute without the rest.
+Busbar keeps 9Router's footprint and ports the useful parts of OmniRoute without the rest.
 
 1. **291 native providers and a filter bar.** 150+ additional providers with config-driven connection testing. The dashboard has instant search by provider or model ID, `All | Configured | Compact` views, 13 category chips, and 7 media-kind filters.
 2. **Sub-second `/v1/models` (23.4s to 1.0s).** Catalogs refresh in the background and persist in the SQLite `kv` table, so `/v1/models` never waits on the Kiro, Qoder, Copilot, or Cursor resolvers.
@@ -50,25 +52,25 @@ ModelMux keeps 9Router's footprint and ports the useful parts of OmniRoute witho
 Global install:
 
 ```bash
-npm install -g modelmux
-modelmux
+npm install -g busbar
+busbar
 ```
 
 Or run with `npx`:
 
 ```bash
-npx modelmux
+npx busbar
 ```
 
 The dashboard opens at `http://localhost:20128/dashboard`. The API is served at `http://localhost:20128/v1`.
 
-The `9router` command still works as an alias for `modelmux`.
+The `9router` command still works as an alias for `busbar`.
 
 ### Claude Code
 
 ```bash
 export ANTHROPIC_BASE_URL=http://localhost:20128
-export ANTHROPIC_AUTH_TOKEN=<your ModelMux API key>
+export ANTHROPIC_AUTH_TOKEN=<your Busbar API key>
 claude
 ```
 
@@ -76,13 +78,13 @@ claude
 
 ```bash
 export OPENAI_BASE_URL=http://localhost:20128/v1
-export OPENAI_API_KEY=<your ModelMux API key>
+export OPENAI_API_KEY=<your Busbar API key>
 ```
 
 ```python
 from openai import OpenAI
 
-client = OpenAI(base_url="http://localhost:20128/v1", api_key="<your ModelMux API key>")
+client = OpenAI(base_url="http://localhost:20128/v1", api_key="<your Busbar API key>")
 r = client.chat.completions.create(
     model="<provider/model or combo name>",
     messages=[{"role": "user", "content": "hello"}],
@@ -92,8 +94,8 @@ r = client.chat.completions.create(
 ### Build from source
 
 ```bash
-git clone https://github.com/TejasLamba2006/modelmux.git
-cd modelmux
+git clone https://github.com/TejasLamba2006/busbar.git
+cd busbar
 cp .env.example .env
 npm install
 npm run dev

@@ -1,215 +1,114 @@
-# 9Router - FREE AI Router & Token Saver
+<div align="center">
+  <img src="https://raw.githubusercontent.com/TejasLamba2006/9router/main/public/banner.png" alt="Busbar" width="100%"/>
 
-**Never stop coding. Save 20-40% tokens with RTK + auto-fallback to FREE & cheap AI models.**
+  # Busbar
 
-**Connect All AI Code Tools (Claude Code, Cursor, Antigravity, Copilot, Codex, Gemini, OpenCode, Cline, OpenClaw...) to 40+ AI Providers & 100+ Models.**
+  **A local LLM multiplexer. One `/v1` endpoint in front of 291 providers.**
 
-[![npm](https://img.shields.io/npm/v/9router.svg)](https://www.npmjs.com/package/9router)
-[![Downloads](https://img.shields.io/npm/dm/9router.svg)](https://www.npmjs.com/package/9router)
-[![Docker Pulls](https://img.shields.io/docker/pulls/decolua/9router.svg?logo=docker&label=Docker%20pulls)](https://hub.docker.com/r/decolua/9router)
-[![GHCR](https://img.shields.io/badge/GHCR-decolua%2F9router-blue?logo=github)](https://github.com/decolua/9router/pkgs/container/9router)
-[![License](https://img.shields.io/npm/l/9router.svg)](https://github.com/decolua/9router/blob/main/LICENSE)
+  In electrical engineering, a busbar is the solid copper strip that collects power from multiple sources and feeds every circuit on one common rail. Busbar does the same for 291 LLM providers on `localhost:20128/v1`.
 
-<a href="https://trendshift.io/repositories/22628" target="_blank"><img src="https://trendshift.io/api/badge/repositories/22628" alt="decolua%2F9router | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
+  [![npm](https://img.shields.io/npm/v/busbar.svg)](https://www.npmjs.com/package/busbar)
+  [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+</div>
 
-[🌐 Website](https://9router.com) • [📖 Full Docs](https://github.com/decolua/9router)
+## What Busbar is
 
----
+Busbar is a local gateway that speaks the OpenAI, Anthropic, and Gemini APIs on port `20128`. It connects 291 native providers behind one `/v1` endpoint: OAuth subscriptions, API keys, free tiers, aggregators, local models, web search, web fetch, TTS, STT, image, video, and embeddings.
 
-## 🤔 Why 9Router?
+Point your tools at it, add accounts in the dashboard, and it handles format translation, model combos, multi-account fallback, token refresh, and usage tracking.
 
-**Stop wasting money, tokens and hitting limits:**
+Busbar is a fork of [9Router](https://github.com/decolua/9router). The on-disk data directory is still `9router`, so existing databases, API keys, and connections keep loading.
 
-- ❌ Subscription quota expires unused every month
-- ❌ Rate limits stop you mid-coding
-- ❌ Tool outputs (git diff, grep, ls...) burn tokens fast
-- ❌ Expensive APIs ($20-50/month per provider)
+## Why Busbar exists
 
-**9Router solves this:**
+### Why OmniRoute feels bloated
 
-- ✅ **RTK Token Saver** - Auto-compress tool_result, save 20-40% tokens
-- ✅ **Maximize subscriptions** - Track quota, use every bit before reset
-- ✅ **Auto fallback** - Subscription → Cheap → Free, zero downtime
-- ✅ **Multi-account** - Round-robin between accounts per provider
-- ✅ **Universal** - Works with any OpenAI/Claude-compatible CLI
+OmniRoute grew into a monolith: 193 SQLite migrations, 90+ CI ratchet scripts, embedded A2A/ACP agent servers, Qdrant vector memory, gamification, sponsor banners, chaos mode, streaming regex PII redaction that mutates payloads, and a 25-file heuristic router. It uses more RAM, starts slowly, and ships features a local gateway should not run.
 
----
+### Why stock 9Router was not enough
 
-## ⚡ Quick Start
+Stock 9Router is fast and lean, but:
 
-**Option 1 — npm (recommended for desktop):**
+- It ships about 144 providers.
+- The dashboard has no provider/model search and no category or media filtering.
+- `/v1/models` blocks for 15 to 23 seconds waiting on slow upstream catalogs.
+- No native `web_search` and `web_fetch` server-tool redirects for non-Anthropic models.
+- It lacks multi-proxy failover and stealth-model reasoning fixes.
 
-```bash
-npm install -g 9router
-9router
+### What Busbar adds
 
-# Or run directly with npx
-npx 9router
-```
+Busbar keeps 9Router's footprint and ports the useful parts of OmniRoute without the rest.
 
-**Option 2 — Docker (server/VPS):**
+1. **291 native providers and a filter bar.** 150+ additional providers with config-driven connection testing. The dashboard has instant search by provider or model ID, `All | Configured | Compact` views, 13 category chips, and 7 media-kind filters.
+2. **Sub-second `/v1/models` (23.4s to 1.0s).** Catalogs refresh in the background and persist in the SQLite `kv` table, so `/v1/models` never waits on the Kiro, Qoder, Copilot, or Cursor resolvers.
+3. **Native `web_search` and `web_fetch` redirect.** Claude Code's web search and fetch tools work on Gemini, DeepSeek, GLM, Codex, or any OpenAI model, routed through Exa, Brave, Tavily, Serper, or SearXNG. Includes SSRF protection and domain filtering.
+4. **Claude Code auto-permission classifier compat.** The optional `claudeClassifierCompat` setting lets non-Claude models answer Claude Code's security classifier without failing permission prompts.
+5. **Per-connection proxy pool rotation and local direct toggle.** Rotate requests across Cloudflare workers, SOCKS5/HTTP proxies, and your own IP (`__local__`), per connection or per retry. Timed-out relays are skipped without locking the upstream account.
+6. **Streaming empty-turn retry and thinking-signature recovery.** The first 128 KB of every upstream SSE stream is cloned and checked, so empty or aborted turns retry before bytes reach the client. Claude 5/5.5 `CAIS` protobuf signatures are validated, Vertex `thoughtSignature` poisoning is fixed, and invalid historical thinking signatures are recovered automatically.
+7. **`models.dev` auto-pricing.** 4-rate pricing (input, output, cache read, cache write/reasoning) across 2,180+ model basenames, including custom Azure and OpenAI-compatible deployments.
 
-```bash
-docker run -d --name 9router -p 20128:20128 \
-  -v "$HOME/.9router:/app/data" -e DATA_DIR=/app/data \
-  decolua/9router:latest
-```
+## Installation and quick start
 
-Published images: [Docker Hub](https://hub.docker.com/r/decolua/9router) • [GHCR](https://github.com/decolua/9router/pkgs/container/9router) (multi-platform amd64/arm64).
-
-🎉 Dashboard opens at `http://localhost:20128`
-
-**2. Connect a FREE provider (no signup needed):**
-
-Dashboard → Providers → Connect **Kiro AI** (free Claude unlimited) or **OpenCode Free** (no auth) → Done!
-
-**3. Use in your CLI tool:**
-
-```
-Claude Code/Codex/OpenClaw/Cursor/Cline Settings:
-  Endpoint: http://localhost:20128/v1
-  API Key:  [copy from dashboard]
-  Model:    kr/claude-sonnet-4.5
-```
-
-That's it! Start coding with FREE AI models.
-
----
-
-## 🚀 CLI Options
+Global install:
 
 ```bash
-9router                    # Start with default settings
-9router --port 8080        # Custom port
-9router --no-browser       # Don't open browser
-9router --skip-update      # Skip auto-update check
-9router --help             # Show all options
+npm install -g busbar
+busbar
 ```
 
-**Dashboard**: `http://localhost:20128/dashboard`
-
----
-
-## 🔌 Connect to a Remote 9Router
-
-Already running 9Router on another machine (e.g. a team server on your LAN)? Point this machine's CLI tools at it — no local server is started:
+Or run with `npx`:
 
 ```bash
-npx 9router connect http://<server-host>:20128                       # pick tools interactively
-npx 9router connect http://<server-host>:20128 --tools claude,codex  # or choose up front
-npx 9router connect --reset --tools claude,codex                     # undo
+npx busbar
 ```
 
-It logs in with the dashboard password (hidden prompt), reuses or creates an API key named `cli-<hostname>`, and writes each tool's config (backing up the original once as `*.bak-9router`).
+The dashboard opens at `http://localhost:20128/dashboard`. The API is served at `http://localhost:20128/v1`.
 
-Supported tools: `claude`, `codex`, `opencode`, `droid`, `crush`, `kilo`, `cline`, `pi`, `omp`, or `all`.
+The `9router` command still works as an alias for `busbar`.
 
-### Models
-
-Models come from the **server's own CLI-tools configuration**, so a client gets whatever the operator already picked on the dashboard. Nothing is hardcoded.
-
-| Tool | Model taken from (first match wins) |
-|---|---|
-| `claude` | tier flag (`--opus` …) → server's Claude tier → *left unset* (Claude Code's own default) |
-| others | `--model` → that tool's own model on the server → server's OpenCode model → *tool skipped* |
-
-`kilo` has no readable model on the server, so it always uses `--model` or the OpenCode model. `omp` (Oh My Pi) needs no model: it uses proxy discovery, so every server model appears under `9router` in `/model`. A Claude tier the server doesn't set is removed from your config rather than kept from an earlier run. A skipped tool makes the command exit `1`.
-
-### Overriding the server's models
+### Claude Code
 
 ```bash
-# One Claude tier; the other tiers still come from the server
-npx 9router connect http://<server-host>:20128 --tools claude --sonnet cc/claude-sonnet-5-5
-
-# Every Claude tier
-npx 9router connect http://<server-host>:20128 --tools claude \
-  --fable cc/claude-fable-5-1 --opus cc/claude-opus-5-5 \
-  --sonnet cc/claude-sonnet-5-5 --haiku cc/claude-haiku-4-5-20251001
-
-# All non-Claude tools at once
-npx 9router connect http://<server-host>:20128 --tools codex,opencode,kilo --model ocg/deepseek-flash
-
-# Claude and other tools in one run
-npx 9router connect http://<server-host>:20128 --tools claude,codex --opus cc/claude-opus-5-5 --model gpt-6
-
-# A different model per tool: --model covers every non-Claude tool in a run, so run once per tool
-npx 9router connect http://<server-host>:20128 --tools codex --model gpt-6
-npx 9router connect http://<server-host>:20128 --tools opencode --model ocg/glm-5.3
+export ANTHROPIC_BASE_URL=http://localhost:20128
+export ANTHROPIC_AUTH_TOKEN=<your Busbar API key>
+claude
 ```
 
-A model the server doesn't list is still written, with a `not listed by server` warning. To see the ids it serves: `curl http://<server-host>:20128/v1/models -H "Authorization: Bearer <your key>"`.
-
-### Checking the current config
-
-`9router show` prints what each CLI tool on this machine is currently set to — base URL, masked API key and models. It only reads local files and never contacts a server.
+### Codex and the OpenAI SDK
 
 ```bash
-npx 9router show                 # every supported tool
-npx 9router show claude          # one tool
-npx 9router show claude codex    # several
-npx 9router show claude --json   # machine-readable (key still masked)
+export OPENAI_BASE_URL=http://localhost:20128/v1
+export OPENAI_API_KEY=<your Busbar API key>
 ```
 
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:20128/v1", api_key="<your Busbar API key>")
+r = client.chat.completions.create(
+    model="<provider/model or combo name>",
+    messages=[{"role": "user", "content": "hello"}],
+)
 ```
-✅ Claude Code
-   File:     ~/.claude/settings.json
-   Base URL: http://<server-host>:20128/v1
-   API key:  sk-a1b…9f3c
-   Models:
-     fable   cc/claude-fable-5-1
-     opus    cc/claude-opus-5-5
-     sonnet  cc/claude-sonnet-5-5
+
+### Build from source
+
+```bash
+git clone https://github.com/TejasLamba2006/busbar.git
+cd busbar
+cp .env.example .env
+npm install
+npm run dev
 ```
 
-Tools not pointed at 9router are listed as `not configured`. For Codex, OpenCode and Cline it also warns when a 9router entry exists but another provider is the active one.
+Set `INITIAL_PASSWORD`, `JWT_SECRET`, and `API_KEY_SECRET` in `.env` before exposing the server beyond localhost.
 
-### Other options
+## Docs
 
-| Option | Purpose |
-|---|---|
-| `--password <pw>` | Dashboard password (or `NINE_ROUTER_PASSWORD`); prompted if omitted — preferred, keeps it out of shell history |
-| `--save` | After a successful login, save the password for this server to `~/.9router/connect.env` (plain text, mode 600) so later runs skip the prompt. Delete the file to forget it |
-| `--api-key <key>` | Use this key and skip login. The server's models can't be read without a login, so pass model flags |
-| `--key-name <name>` | API key name to reuse/create (default `cli-<hostname>`) |
-| `--print-env` | Also print `OPENAI_BASE_URL` / `OPENAI_API_KEY` for other CLIs |
-| `--reset` | Remove the 9router settings from the selected tools |
+- [Architecture](docs/ARCHITECTURE.md)
+- [Routing engine conventions](open-sse/AGENTS.md)
+- [Changelog](CHANGELOG.md)
 
-See `9router connect --help` for the full list.
+## License
 
-> ⚠️ Over plain `http://` the password and API key are sent unencrypted — use a trusted LAN/VPN or put HTTPS in front. The API key is stored in each tool's config file.
-
----
-
-## 🛠️ Supported CLI Tools
-
-Claude-Code • OpenClaw • Codex • OpenCode • Cursor • Antigravity • Cline • Continue • Droid • Roo • Copilot • Kilo Code • Gemini CLI • Qwen Code • iFlow • Crush • Crusher • Aider
-
-Any tool supporting OpenAI/Claude-compatible API works.
-
----
-
-## 💾 Data Location
-
-- **macOS/Linux**: `~/.9router/db/data.sqlite`
-- **Windows**: `%APPDATA%/9router/db/data.sqlite`
-- **Docker**: `/app/data/db/data.sqlite` (mount `$HOME/.9router` to persist)
-
----
-
-## 📚 Documentation
-
-Full docs, advanced setup, video tutorials & development guide:
-
-- **GitHub**: https://github.com/decolua/9router
-- **Full README**: https://github.com/decolua/9router/blob/master/README.md
-- **Website**: https://9router.com
-
----
-
-## 🙏 Acknowledgments
-
-- **[CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)** - Original Go implementation
-
-## 📄 License
-
-MIT License - see [LICENSE](LICENSE) for details.
+MIT

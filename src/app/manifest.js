@@ -1,7 +1,7 @@
 export default function manifest() {
   return {
-    name: 'ModelMux: AI Infrastructure Management',
-    short_name: 'ModelMux',
+    name: 'Busbar: AI Infrastructure Management',
+    short_name: 'Busbar',
     description: 'One endpoint for all your AI providers. Manage keys, monitor usage, and scale effortlessly.',
     start_url: '/',
     display: 'standalone',

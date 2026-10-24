@@ -1,14 +1,14 @@
 {
-  "name": "modelmux",
+  "name": "busbar",
   "version": "1.0.0",
-  "description": "Fast, zero-bloat local LLM multiplexer and gateway for 290+ providers",
+  "description": "Fast, zero-bloat local LLM gateway and multiplexer for 290+ providers",
   "author": "TejasLamba2006",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/TejasLamba2006/modelmux.git"
+    "url": "git+https://github.com/TejasLamba2006/busbar.git"
   },
   "bin": {
-    "modelmux": "./cli.js",
+    "busbar": "./cli.js",
     "9router": "./cli.js"
   },
   "files": [
@@ -43,7 +43,7 @@
     "node": ">=18.0.0"
   },
   "keywords": [
-    "modelmux",
+    "busbar",
     "llm",
     "gateway",
     "proxy",

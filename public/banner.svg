@@ -14,46 +14,49 @@
   <!-- mark (32-grid x6) -->
   <g transform="translate(96 160) scale(6)">
     <rect width="32" height="32" rx="6" fill="#17181A" stroke="#2A2B2F" stroke-width="0.17"/>
-    <path d="M6 10H11M6 16H11M6 22H11" stroke="#EDEDEA" stroke-width="2"/>
-    <rect x="3" y="9" width="2" height="2" fill="#EDEDEA"/>
-    <rect x="3" y="15" width="2" height="2" fill="#EDEDEA"/>
-    <rect x="3" y="21" width="2" height="2" fill="#EDEDEA"/>
-    <path d="M11 5L21 9V23L11 27Z" fill="#FF5A1F"/>
-    <path d="M12.75 21.5V11.5H14.25L16 14.6L17.75 11.5H19.25V21.5H17.75V14.6L16 17.7L14.25 14.6V21.5Z" fill="#17181A"/>
-    <path d="M21 16H26" stroke="#FF5A1F" stroke-width="2"/>
-    <rect x="26" y="14.5" width="3" height="3" fill="#FF5A1F"/>
+    <path d="M4 8H9V10H4ZM4 15H9V17H4ZM4 22H9V24H4Z" fill="#EDEDEA"/>
+    <path fill-rule="evenodd" d="M9 5H22L25 8V12L24 14L27 17V24L24 27H9ZM14 8V12H21V8ZM14 16V24H23V16Z" fill="#FF5A1F"/>
+    <path d="M10.5 8H12.5V10H10.5ZM10.5 15H12.5V17H10.5ZM10.5 22H12.5V24H10.5Z" fill="#17181A"/>
   </g>
 
   <!-- wordmark -->
-  <text x="96" y="430" font-family="'JetBrains Mono', Consolas, 'Courier New', monospace" font-size="88" font-weight="700" letter-spacing="6" fill="#EDEDEA">MODELMUX</text>
+  <text x="96" y="430" font-family="'JetBrains Mono', Consolas, 'Courier New', monospace" font-size="88" font-weight="700" letter-spacing="6" fill="#EDEDEA">BUSBAR</text>
   <text x="100" y="482" font-family="'JetBrains Mono', Consolas, 'Courier New', monospace" font-size="28" letter-spacing="1" fill="#9A9DA3">291 Providers <tspan fill="#FF5A1F">-&gt;</tspan> 1 Endpoint</text>
-  <text x="100" y="552" font-family="'JetBrains Mono', Consolas, 'Courier New', monospace" font-size="18" letter-spacing="2" fill="#686B71">$ npm i -g modelmux   //   LOCAL LLM GATEWAY   //   :20128/v1</text>
+  <text x="100" y="552" font-family="'JetBrains Mono', Consolas, 'Courier New', monospace" font-size="18" letter-spacing="2" fill="#686B71">$ npx busbar   //   LOCAL LLM GATEWAY   //   :20128/v1</text>
 
-  <!-- schematic: N inputs -> MUX -> 1 output -->
+  <!-- schematic: N feeders -> copper busbar -> 1 output feeder -->
   <g font-family="'JetBrains Mono', Consolas, 'Courier New', monospace" font-size="14" letter-spacing="1">
-    <text x="704" y="128" fill="#686B71">IN[0..290]</text>
+    <text x="704" y="128" fill="#686B71">FEED[0..290]</text>
+    <!-- feeder lines -->
     <g stroke="#3A3B40" stroke-width="2">
-      <path d="M704 160H880M704 192H880M704 224H880M704 256H880M704 288H880M704 320H880M704 352H880M704 384H880M704 416H880"/>
+      <path d="M720 160H896M720 192H896M720 224H896M720 256H896M720 320H896M720 352H896M720 384H896M720 416H896"/>
     </g>
+    <path d="M720 288H896" stroke="#EDEDEA" stroke-width="2"/>
+    <!-- source terminals (circle = generator) -->
+    <g stroke="#EDEDEA" stroke-width="2" fill="#0C0D0E">
+      <circle cx="712" cy="160" r="6"/><circle cx="712" cy="192" r="6"/><circle cx="712" cy="224" r="6"/>
+      <circle cx="712" cy="256" r="6"/><circle cx="712" cy="288" r="6"/><circle cx="712" cy="320" r="6"/>
+      <circle cx="712" cy="352" r="6"/><circle cx="712" cy="384" r="6"/><circle cx="712" cy="416" r="6"/>
+    </g>
+    <!-- breakers -->
     <g fill="#EDEDEA">
-      <rect x="696" y="156" width="8" height="8"/><rect x="696" y="188" width="8" height="8"/>
-      <rect x="696" y="220" width="8" height="8"/><rect x="696" y="252" width="8" height="8"/>
-      <rect x="696" y="284" width="8" height="8"/><rect x="696" y="316" width="8" height="8"/>
-      <rect x="696" y="348" width="8" height="8"/><rect x="696" y="380" width="8" height="8"/>
-      <rect x="696" y="412" width="8" height="8"/>
+      <rect x="840" y="156" width="8" height="8"/><rect x="840" y="188" width="8" height="8"/>
+      <rect x="840" y="220" width="8" height="8"/><rect x="840" y="252" width="8" height="8"/>
+      <rect x="840" y="284" width="8" height="8"/><rect x="840" y="316" width="8" height="8"/>
+      <rect x="840" y="348" width="8" height="8"/><rect x="840" y="380" width="8" height="8"/>
+      <rect x="840" y="412" width="8" height="8"/>
     </g>
-    <!-- active channel -->
-    <path d="M704 224H880" stroke="#EDEDEA" stroke-width="2"/>
-    <!-- mux block -->
-    <path d="M880 112L1024 176V400L880 464Z" fill="#17181A" stroke="#FF5A1F" stroke-width="2"/>
-    <path d="M880 224L1024 288" stroke="#FF5A1F" stroke-width="2" stroke-dasharray="6 6"/>
-    <text x="916" y="300" fill="#FF5A1F" font-size="22" font-weight="700" letter-spacing="4">MUX</text>
-    <!-- select bus -->
-    <path d="M952 432V512" stroke="#3A3B40" stroke-width="2"/>
-    <path d="M944 488L960 472" stroke="#3A3B40" stroke-width="2"/>
-    <text x="968" y="508" fill="#686B71">SEL[9]</text>
-    <!-- output -->
-    <path d="M1024 288H1168" stroke="#FF5A1F" stroke-width="4"/>
+    <!-- copper busbar -->
+    <rect x="896" y="128" width="32" height="320" fill="#FF5A1F"/>
+    <g fill="#0C0D0E">
+      <rect x="908" y="156" width="8" height="8"/><rect x="908" y="220" width="8" height="8"/>
+      <rect x="908" y="284" width="8" height="8"/><rect x="908" y="348" width="8" height="8"/>
+      <rect x="908" y="412" width="8" height="8"/>
+    </g>
+    <text x="880" y="480" fill="#FF5A1F" font-size="22" font-weight="700" letter-spacing="4">BUS</text>
+    <text x="880" y="504" fill="#686B71">Cu  0 OHM</text>
+    <!-- output feeder -->
+    <path d="M928 288H1168" stroke="#FF5A1F" stroke-width="4"/>
     <rect x="1168" y="278" width="20" height="20" fill="#FF5A1F"/>
     <text x="1104" y="268" fill="#9A9DA3">OUT</text>
     <text x="1144" y="328" fill="#EDEDEA">/v1</text>

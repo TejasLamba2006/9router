@@ -1,11 +1,11 @@
 {
-  "name": "modelmux-app",
+  "name": "busbar-app",
   "version": "1.0.0",
-  "description": "ModelMux web dashboard and gateway",
+  "description": "Busbar web dashboard and gateway",
   "private": true,
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/TejasLamba2006/modelmux.git"
+    "url": "git+https://github.com/TejasLamba2006/busbar.git"
   },
   "scripts": {
     "dev": "next dev --port 20127",

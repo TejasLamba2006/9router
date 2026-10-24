@@ -1,14 +1,9 @@
 <svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <!-- ModelMux mark. Drawn on a 32-unit grid, scaled x16. -->
+  <!-- Busbar mark. Drawn on a 32-unit grid, scaled x16. -->
   <g transform="scale(16)">
     <rect width="32" height="32" rx="6" fill="#0C0D0E"/>
-    <path d="M6 10H11M6 16H11M6 22H11" stroke="#EDEDEA" stroke-width="2"/>
-    <rect x="3" y="9" width="2" height="2" fill="#EDEDEA"/>
-    <rect x="3" y="15" width="2" height="2" fill="#EDEDEA"/>
-    <rect x="3" y="21" width="2" height="2" fill="#EDEDEA"/>
-    <path d="M11 5L21 9V23L11 27Z" fill="#FF5A1F"/>
-    <path d="M12.75 21.5V11.5H14.25L16 14.6L17.75 11.5H19.25V21.5H17.75V14.6L16 17.7L14.25 14.6V21.5Z" fill="#0C0D0E"/>
-    <path d="M21 16H26" stroke="#FF5A1F" stroke-width="2"/>
-    <rect x="26" y="14.5" width="3" height="3" fill="#FF5A1F"/>
+    <path d="M4 8H9V10H4ZM4 15H9V17H4ZM4 22H9V24H4Z" fill="#EDEDEA"/>
+    <path fill-rule="evenodd" d="M9 5H22L25 8V12L24 14L27 17V24L24 27H9ZM14 8V12H21V8ZM14 16V24H23V16Z" fill="#FF5A1F"/>
+    <path d="M10.5 8H12.5V10H10.5ZM10.5 15H12.5V17H10.5ZM10.5 22H12.5V24H10.5Z" fill="#0C0D0E"/>
   </g>
 </svg>
