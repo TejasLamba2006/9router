@@ -1,6 +1,6 @@
 {
   "name": "busbar-ai",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "Fast, zero-bloat local LLM gateway and multiplexer for 290+ providers",
   "author": {"name": "Tejas Lamba", "url": "https://tejas.is-a.dev/"},
   "homepage": "https://github.com/TejasLamba2006/busbar#readme",
@@ -10,8 +10,7 @@
   },
   "bin": {
     "busbar": "./cli.js",
-    "busbar-ai": "./cli.js",
-    "9router": "./cli.js"
+    "busbar-ai": "./cli.js"
   },
   "files": [
     "cli.js",
