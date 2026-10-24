@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"cd C:/Users/Tejas/9router-sync/tests && npx vitest run unit/model-test-batch-route.test.js\",\"timeout\":120000,\"description\":\"Reproduce OpenCode no-auth test failure\",\"run_in_background\":fal...",
+  "error": "Exit code 1\n\n RUN  v4.1.11 C:/Users/Tejas/9router-sync/tests\n\n ❯ unit/model-test-batch-route.test.js (12 tests | 1 failed) 38ms\n     × accepts the virtual no-auth connection for free providers 6ms\n\n⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯\n\n FAIL  unit/model-test-batch-route.test.js > model test batch route > accepts the virtual no-auth connection for free providers\nAssertionError: expected 400 to be 200 // Object.is equality\n\n- Expected\n+ Received\n\n- 200\n+ 400\n\n ❯ unit/model-test-batch-route.test.js:70:29...",
+  "timestamp": "2026-10-10T10:24:23.085Z",
+  "retry_count": 1
+}

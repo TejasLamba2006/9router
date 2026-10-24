@@ -3,6 +3,9 @@ import { getSettings, updateSettings } from "@/lib/localDb";
 import { applyOutboundProxyEnv } from "@/lib/network/outboundProxy";
 import { resetComboRotation } from "open-sse/services/combo.js";
 import bcrypt from "bcryptjs";
+import fs from "node:fs";
+import path from "node:path";
+import { DATA_DIR } from "@/lib/dataDir.js";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -76,7 +79,21 @@ export async function PATCH(request) {
       }
     }
 
+    if (Object.prototype.hasOwnProperty.call(body, "serverPort")) {
+      const n = Number(body.serverPort);
+      if (!Number.isInteger(n) || n < 1 || n > 65535) {
+        return NextResponse.json({ error: "serverPort must be an integer between 1 and 65535" }, { status: 400 });
+      }
+      body.serverPort = n;
+    }
+
     const settings = await updateSettings(body);
+
+    // Thin CLI reads port.json at startup (no SQLite driver needed there)
+    if (body.serverPort !== undefined) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+      fs.writeFileSync(path.join(DATA_DIR, "port.json"), JSON.stringify({ port: body.serverPort }));
+    }
 
     // Apply outbound proxy settings immediately (no restart required)
     if (

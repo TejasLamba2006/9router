@@ -130,7 +130,8 @@ const PROCESS_IDENTIFIERS = [
 ];
 
 // Parse arguments
-let port = DEFAULT_PORT;
+let flagPort = null;
+let savePortFlag = false;
 let host = DEFAULT_HOST;
 let noBrowser = false;
 let skipUpdate = false;
@@ -139,8 +140,10 @@ let trayMode = false;
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--port" || args[i] === "-p") {
-    port = parseInt(args[i + 1], 10) || DEFAULT_PORT;
+    flagPort = parseInt(args[i + 1], 10) || null;
     i++;
+  } else if (args[i] === "--save-port") {
+    savePortFlag = true;
   } else if (args[i] === "--host" || args[i] === "-H") {
     host = args[i + 1] || DEFAULT_HOST;
     i++;
@@ -158,7 +161,8 @@ for (let i = 0; i < args.length; i++) {
 Usage: ${APP_NAME} [options]
 
 Options:
-  -p, --port <port>   Port to run the server (default: ${DEFAULT_PORT})
+  -p, --port <port>   Port to run the server (default: saved port or ${DEFAULT_PORT}; env PORT also works)
+  --save-port         Save --port as the default for future runs
   -H, --host <host>   Host to bind (default: ${DEFAULT_HOST})
   -n, --no-browser    Don't open browser automatically
   -l, --log           Show server logs (default: hidden)
@@ -181,6 +185,13 @@ Commands:
     console.log(pkg.version);
     process.exit(0);
   }
+}
+
+const portUtil = require("./src/cli/utils/port");
+const port = portUtil.resolvePort({ flagPort });
+if (savePortFlag) {
+  try { portUtil.savePort(port); console.log(`Saved default port ${port}`); }
+  catch (e) { console.error(`Could not save port: ${e.message}`); }
 }
 
 // Auto-relaunch after update: detached process has no TTY → fallback to tray

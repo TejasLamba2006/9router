@@ -83,6 +83,9 @@ export default function ProfilePage() {
   const certFileRef = useRef(null);
 
   const importFileRef = useRef(null);
+  const [portInput, setPortInput] = useState("");
+  const [portStatus, setPortStatus] = useState({ type: "", message: "" });
+  const [activePort, setActivePort] = useState("");
   const [proxyForm, setProxyForm] = useState({
     outboundProxyEnabled: false,
     outboundProxyUrl: "",
@@ -103,6 +106,8 @@ export default function ProfilePage() {
       .then((res) => res.json())
       .then((data) => {
         setSettings(data);
+        setPortInput(String(data?.serverPort || 20128));
+        setActivePort(window.location.port || "20128");
         setOidcForm({
           authMode: data?.authMode || "password",
           oidcIssuerUrl: data?.oidcIssuerUrl || "",
@@ -270,6 +275,27 @@ export default function ProfilePage() {
       setPassStatus({ type: "error", message: "An error occurred" });
     } finally {
       setPassLoading(false);
+    }
+  };
+
+  const saveServerPort = async () => {
+    const n = Number(portInput);
+    if (!Number.isInteger(n) || n < 1 || n > 65535) {
+      setPortStatus({ type: "error", message: "Enter a port between 1 and 65535" });
+      return;
+    }
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ serverPort: n }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to save port");
+      setSettings(prev => ({ ...prev, serverPort: n }));
+      setPortStatus({ type: "success", message: "Saved. Takes effect on next gateway restart." });
+    } catch (err) {
+      setPortStatus({ type: "error", message: err.message });
     }
   };
 
@@ -865,6 +891,36 @@ export default function ProfilePage() {
               </p>
             )}
           </div>
+        </Card>
+
+        {/* Server Port */}
+        <Card>
+          <div className="flex items-center gap-3 mb-4">
+            <div className="size-10 rounded-lg bg-blue-500/10 text-blue-500 flex items-center justify-center shrink-0">
+              <span className="material-symbols-outlined text-[20px]">lan</span>
+            </div>
+            <h3 className="text-base sm:text-lg font-semibold">Server Port</h3>
+          </div>
+          <p className="text-sm text-text-muted mb-3">
+            Active port: {activePort}. Default port is 20128.
+          </p>
+          <div className="flex gap-2 items-end">
+            <Input
+              type="number"
+              min={1}
+              max={65535}
+              label="Default Server Port"
+              value={portInput}
+              onChange={(e) => setPortInput(e.target.value)}
+            />
+            <Button variant="primary" onClick={saveServerPort}>Save Port</Button>
+          </div>
+          {portStatus.message && (
+            <p className={`text-sm mt-2 ${portStatus.type === "error" ? "text-red-500" : "text-green-500"}`}>{portStatus.message}</p>
+          )}
+          <p className="text-xs text-text-muted mt-2">
+            Takes effect on next gateway restart. You can also override per run with: busbar --port &lt;port&gt;
+          </p>
         </Card>
 
         {/* Language */}

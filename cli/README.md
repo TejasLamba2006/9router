@@ -68,6 +68,15 @@ The dashboard opens at `http://localhost:20128/dashboard`. The API is served at 
 
 The `9router` command still works as an alias for `busbar`.
 
+### Changing the port
+
+The default port is 20128. Port resolution order:
+
+1. `busbar --port <port>` (or `-p <port>`); add `--save-port` to keep it as the new default
+2. `PORT=<port>` environment variable
+3. Dashboard, Settings, Server Port (saved to `port.json` in the data directory, applies on next restart)
+4. 20128
+
 ### Claude Code
 
 ```bash
