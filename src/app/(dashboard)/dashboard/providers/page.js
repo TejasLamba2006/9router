@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import PropTypes from "prop-types";
 import {
   Card,
@@ -12,6 +12,7 @@ import {
 import ProviderIcon from "@/shared/components/ProviderIcon";
 import { getProviderIconSrc } from "@/shared/utils/providerIcon";
 import { OAUTH_PROVIDERS, APIKEY_PROVIDERS } from "@/shared/constants/config";
+import { PROVIDER_MODELS } from "@/shared/constants/models";
 import {
   FREE_PROVIDERS,
   FREE_TIER_PROVIDERS,
@@ -25,7 +26,25 @@ import { useNotificationStore } from "@/store/notificationStore";
 import { useHeaderSearchStore } from "@/store/headerSearchStore";
 import ModelAvailabilityBadge from "./components/ModelAvailabilityBadge";
 import AddCompatibleModal from "./components/AddCompatibleModal";
-import { STATUS_FILTER_OPTIONS, matchesStatusFilter } from "./utils";
+import ProviderSummaryCard from "./components/ProviderSummaryCard";
+import { matchesStatusFilter } from "./utils";
+import {
+  CATEGORY_FILTERS,
+  DISPLAY_MODE_STORAGE_KEY,
+  SECTION_ORDER,
+  SECTION_TITLES,
+  buildFilterSearch,
+  buildModelIndex,
+  findModelMatches,
+  getProviderCategories,
+  getSectionId,
+  isConfigured,
+  matchesCategory,
+  matchesMedia,
+  matchesSearch,
+  normalizeDisplayMode,
+  readFilterParams,
+} from "./providerFiltering";
 
 function getStatusDisplay(connected, error, errorCode) {
   const parts = [];
@@ -95,6 +114,23 @@ function getConnectionErrorTag(connection) {
 }
 
 const APIKEY_INITIAL_VISIBLE = 20;
+const GRID = "grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4";
+const COMPACT_GRID = "grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4";
+
+// Dual-auth providers (oauth + apikey) store API keys as authType "apikey"
+// (and sometimes "api_key"). Card stats must count both so totals match detail.
+// kiro has no authModes in registry but accepts both (headless uses "api_key").
+const dualAuthTypes = (info, key) => {
+  if (key === "kiro") return ["oauth", "apikey", "api_key"];
+  const modes = info?.authModes;
+  if (!Array.isArray(modes)) {
+    return key in FREE_TIER_PROVIDERS || key in APIKEY_PROVIDERS
+      ? ["oauth", "apikey", "api_key"]
+      : "oauth";
+  }
+  if (!modes.includes("apikey")) return "oauth";
+  return ["oauth", "apikey", "api_key"];
+};
 
 export default function ProvidersPage() {
   const [connections, setConnections] = useState([]);
@@ -107,47 +143,62 @@ export default function ProvidersPage() {
   const [testingMode, setTestingMode] = useState(null);
   const [testResults, setTestResults] = useState(null);
   const [statusFilter, setStatusFilter] = useState("all");
+  const [modelQuery, setModelQuery] = useState("");
+  const [displayMode, setDisplayMode] = useState("all");
+  const [category, setCategory] = useState("all");
+  const [media, setMedia] = useState("");
+  const [urlReady, setUrlReady] = useState(false);
   const notify = useNotificationStore();
   const searchQuery = useHeaderSearchStore((s) => s.query);
+  const setSearchQuery = useHeaderSearchStore((s) => s.setQuery);
   const registerSearch = useHeaderSearchStore((s) => s.register);
   const unregisterSearch = useHeaderSearchStore((s) => s.unregister);
 
+  // Register header search, then hydrate filters from URL (?search ?model ?mode ?cat ?media)
+  // and localStorage (display mode, used when URL has no ?mode=).
   useEffect(() => {
     registerSearch("Search providers...");
+    /* eslint-disable react-hooks/set-state-in-effect -- one-time hydration from URL/localStorage (not available during SSR) */
+    const p = readFilterParams(window.location.search);
+    if (p.search) setSearchQuery(p.search);
+    setModelQuery(p.model);
+    setCategory(p.cat);
+    setMedia(p.media);
+    let mode = p.mode;
+    if (!mode) {
+      try {
+        mode = normalizeDisplayMode(localStorage.getItem(DISPLAY_MODE_STORAGE_KEY));
+      } catch {
+        mode = "all";
+      }
+    }
+    setDisplayMode(mode);
+    setUrlReady(true);
+    /* eslint-enable react-hooks/set-state-in-effect */
     return () => unregisterSearch();
-  }, [registerSearch, unregisterSearch]);
+  }, [registerSearch, unregisterSearch, setSearchQuery]);
 
-  const matchSearch = (name) => {
-    if (!searchQuery.trim()) return true;
-    if (!name) return false;
-    return name.toLowerCase().includes(searchQuery.trim().toLowerCase());
+  // Mirror filters to the URL without a navigation.
+  useEffect(() => {
+    if (!urlReady) return;
+    const next = buildFilterSearch({
+      search: searchQuery,
+      model: modelQuery,
+      mode: displayMode,
+      cat: category,
+      media,
+    });
+    if (next !== window.location.search) {
+      window.history.replaceState(null, "", `${window.location.pathname}${next}`);
+    }
+  }, [urlReady, searchQuery, modelQuery, displayMode, category, media]);
+
+  const changeDisplayMode = (mode) => {
+    setDisplayMode(mode);
+    try {
+      localStorage.setItem(DISPLAY_MODE_STORAGE_KEY, mode);
+    } catch {}
   };
-
-  const sortByPriority = (entries, authType) =>
-    [...entries].sort(([ka, a], [kb, b]) => {
-      const pa = a.priority ?? 999;
-      const pb = b.priority ?? 999;
-      if (pa !== pb) return pa - pb;
-      const sa = getProviderStats(ka, authType);
-      const sb = getProviderStats(kb, authType);
-      const ca = sa.connected > 0 ? 1 : 0;
-      const cb = sb.connected > 0 ? 1 : 0;
-      if (ca !== cb) return cb - ca;
-      return (a.name || "").localeCompare(b.name || "");
-    });
-
-  const sortItemsByPriority = (items, authType) =>
-    [...items].sort((a, b) => {
-      const pa = a.priority ?? 999;
-      const pb = b.priority ?? 999;
-      if (pa !== pb) return pa - pb;
-      const sa = getProviderStats(a.id, authType);
-      const sb = getProviderStats(b.id, authType);
-      const ca = sa.connected > 0 ? 1 : 0;
-      const cb = sb.connected > 0 ? 1 : 0;
-      if (ca !== cb) return cb - ca;
-      return (a.name || "").localeCompare(b.name || "");
-    });
 
   useEffect(() => {
     const fetchData = async () => {
@@ -169,6 +220,28 @@ export default function ProvidersPage() {
     };
     fetchData();
   }, []);
+
+  // Model index for "Search by Model": static registry + live /v1/models + custom models.
+  // Live/custom are fetched lazily, once, the first time a model query is typed.
+  const liveRequested = useRef(false);
+  const [live, setLive] = useState({ liveIds: [], custom: [] });
+  useEffect(() => {
+    if (!modelQuery.trim() || liveRequested.current) return;
+    liveRequested.current = true;
+    Promise.allSettled([
+      fetch("/api/v1/models").then((r) => r.json()),
+      fetch("/api/models/custom").then((r) => r.json()),
+    ]).then(([m, c]) =>
+      setLive({
+        liveIds: m.status === "fulfilled" ? (m.value?.data || []).map((x) => x.id) : [],
+        custom: c.status === "fulfilled" ? c.value?.models || [] : [],
+      }),
+    );
+  }, [modelQuery]);
+  const modelIndex = useMemo(
+    () => buildModelIndex({ staticModels: PROVIDER_MODELS, ...live }),
+    [live],
+  );
 
   const getProviderStats = (providerId, authType) => {
     const authTypes = Array.isArray(authType) ? authType : [authType];
@@ -213,9 +286,6 @@ export default function ProvidersPage() {
 
     return { connected, error, total, errorCode, errorTime, allDisabled };
   };
-
-  const matchStatus = (stats, isNoAuth) =>
-    matchesStatusFilter(statusFilter, stats, isNoAuth);
 
   // Toggle all connections for a provider on/off. authType may be a single
   // string or an array (kiro counts oauth + api_key/apikey together).
@@ -263,126 +333,98 @@ export default function ProvidersPage() {
     }
   };
 
-  const compatibleProviders = providerNodes
-    .filter((node) => node.type === "openai-compatible")
-    .map((node) => ({
-      id: node.id,
-      name: node.name || "OpenAI Compatible",
-      color: "#10A37F",
-      textIcon: "OC",
-      apiType: node.apiType,
-    }))
-    .filter(
-      (p) => matchSearch(p.name) && matchStatus(getProviderStats(p.id, "apikey")),
-    );
-
-  const anthropicCompatibleProviders = providerNodes
-    .filter((node) => node.type === "anthropic-compatible")
-    .map((node) => ({
-      id: node.id,
-      name: node.name || "Anthropic Compatible",
-      color: "#D97757",
-      textIcon: "AC",
-    }))
-    .filter(
-      (p) => matchSearch(p.name) && matchStatus(getProviderStats(p.id, "apikey")),
-    );
-
-  // Dual-auth providers (oauth + apikey) store API keys as authType "apikey"
-  // (and sometimes "api_key"). Card stats must count both so totals match detail.
-  // kiro has no authModes in registry but accepts both (headless uses "api_key").
-  const dualAuthTypes = (info, key) => {
-    if (key === "kiro") return ["oauth", "apikey", "api_key"];
-    const modes = info?.authModes;
-    // Free-tier and API-key providers default to supporting apikey even when the
-    // registry entry omits authModes (e.g. cloudflare-ai, byteplus, ollama,
-    // vertex) — otherwise their apikey connections are invisible on the grid card.
-    if (!Array.isArray(modes)) {
-      return key in FREE_TIER_PROVIDERS || key in APIKEY_PROVIDERS
-        ? ["oauth", "apikey", "api_key"]
-        : "oauth";
+  // ---- Build one unified entry list, then filter it ----
+  const allEntries = useMemo(() => {
+    const out = [];
+    const push = (key, info, group, authTypes, cardKind, cardAuthType) =>
+      out.push({
+        key,
+        info,
+        group,
+        authTypes,
+        cardKind,
+        cardAuthType,
+        cats: getProviderCategories(key, info, group),
+        section: getSectionId(info, group, key),
+      });
+    for (const node of providerNodes) {
+      if (node.type === "openai-compatible") {
+        push(node.id, { id: node.id, name: node.name || "OpenAI Compatible", color: "#10A37F", textIcon: "OC", apiType: node.apiType }, "custom", "apikey", "apikey", "compatible");
+      } else if (node.type === "anthropic-compatible") {
+        push(node.id, { id: node.id, name: node.name || "Anthropic Compatible", color: "#D97757", textIcon: "AC" }, "custom", "apikey", "apikey", "compatible");
+      }
     }
-    if (!modes.includes("apikey")) return "oauth";
-    return ["oauth", "apikey", "api_key"];
+    for (const [key, info] of Object.entries(OAUTH_PROVIDERS)) {
+      if (!info.hidden) push(key, info, "oauth", dualAuthTypes(info, key), "oauth", "oauth");
+    }
+    for (const [key, info] of Object.entries(FREE_PROVIDERS)) {
+      if (!info.hidden) push(key, info, "free", dualAuthTypes(info, key), "oauth", "free");
+    }
+    for (const [key, info] of Object.entries(FREE_TIER_PROVIDERS)) {
+      if (info.hidden) continue;
+      const at = dualAuthTypes(info, key);
+      push(key, info, "freeTier", at, "apikey", Array.isArray(at) ? (at[0] ?? "apikey") : at);
+    }
+    for (const [key, info] of Object.entries(APIKEY_PROVIDERS)) {
+      if (!info.hidden) push(key, info, "apikey", "apikey", "apikey", "apikey");
+    }
+    for (const [key, info] of Object.entries(WEB_COOKIE_PROVIDERS)) {
+      if (!info.hidden) push(key, info, "webCookie", "cookie", "apikey", "cookie");
+    }
+    return out;
+  }, [providerNodes]);
+
+  const entries = allEntries.map((e) => ({ ...e, stats: getProviderStats(e.key, e.authTypes) }));
+
+  const categoryCounts = {};
+  for (const c of CATEGORY_FILTERS) {
+    const inCat = entries.filter((e) => matchesCategory(e.cats, c.id));
+    categoryCounts[c.id] = {
+      total: inCat.length,
+      configured: inCat.filter((e) => isConfigured(e.stats, e.info)).length,
+    };
+  }
+
+  const modelFilterActive = !!modelQuery.trim();
+  const isFiltering =
+    !!searchQuery.trim() || modelFilterActive || statusFilter !== "all" ||
+    category !== "all" || !!media || displayMode !== "all";
+
+  const byPriority = (a, b) => {
+    const pa = a.info.priority ?? 999;
+    const pb = b.info.priority ?? 999;
+    if (pa !== pb) return pa - pb;
+    const ca = a.stats.total > 0 || a.info.noAuth ? 0 : 1;
+    const cb = b.stats.total > 0 || b.info.noAuth ? 0 : 1;
+    if (ca !== cb) return ca - cb;
+    return (a.info.name || "").localeCompare(b.info.name || "");
   };
 
-  const oauthEntries = sortByPriority(
-    Object.entries(OAUTH_PROVIDERS).filter(
-      ([key, info]) =>
-        !info.hidden &&
-        matchSearch(info.name) &&
-        matchStatus(getProviderStats(key, dualAuthTypes(info, key)), info.noAuth),
-    ),
-    "oauth",
-  );
-  const freeEntries = Object.entries(FREE_PROVIDERS)
-    .filter(
-      ([key, info]) =>
-        !info.hidden &&
-        matchSearch(info.name) &&
-        matchStatus(getProviderStats(key, dualAuthTypes(info, key)), info.noAuth),
-    )
-    .sort(([, a], [, b]) => (b.noAuth ? 1 : 0) - (a.noAuth ? 1 : 0));
-  // Free Tier cards may be oauth-only (e.g. kimchi) or dual-auth, so count via
-  // dualAuthTypes per provider instead of a fixed "apikey" — otherwise oauth
-  // connections are invisible here (mismatch with the detail page).
-  const freeTierEntries = Object.entries(FREE_TIER_PROVIDERS)
-    .filter(
-      ([key, info]) =>
-        !info.hidden &&
-        matchSearch(info.name) &&
-        (info.serviceKinds ?? ["llm"]).includes("llm") &&
-        matchStatus(getProviderStats(key, dualAuthTypes(info, key)), info.noAuth),
-    )
-    .sort(([ka, a], [kb, b]) => {
-      const pa = a.priority ?? 999;
-      const pb = b.priority ?? 999;
-      if (pa !== pb) return pa - pb;
-      const noAuthDiff = (b.noAuth ? 1 : 0) - (a.noAuth ? 1 : 0);
-      if (noAuthDiff !== 0) return noAuthDiff;
-      const ca = getProviderStats(ka, dualAuthTypes(a, ka)).connected > 0 ? 0 : 1;
-      const cb = getProviderStats(kb, dualAuthTypes(b, kb)).connected > 0 ? 0 : 1;
-      if (ca !== cb) return ca - cb;
-      return (a.name || "").localeCompare(b.name || "");
-    });
-  // API Key: connected providers first, then alphabetical by name
-  const apikeyEntries = Object.entries(APIKEY_PROVIDERS)
-    .filter(
-      ([key, info]) =>
-        !info.hidden &&
-        (info.serviceKinds ?? ["llm"]).includes("llm") &&
-        matchSearch(info.name) &&
-        matchStatus(getProviderStats(key, "apikey"), info.noAuth),
-    )
-    .sort(([ka, a], [kb, b]) => {
-      const ca = getProviderStats(ka, "apikey").total > 0 ? 0 : 1;
-      const cb = getProviderStats(kb, "apikey").total > 0 ? 0 : 1;
-      if (ca !== cb) return ca - cb;
-      return (a.name || "").localeCompare(b.name || "");
-    });
-  const isApikeySearching = !!searchQuery.trim() || statusFilter !== "all";
-  const visibleApikeyEntries =
-    isApikeySearching || showAllApikey
-      ? apikeyEntries
-      : apikeyEntries.slice(0, APIKEY_INITIAL_VISIBLE);
-  const hiddenApikeyCount = apikeyEntries.length - APIKEY_INITIAL_VISIBLE;
+  const visible = entries
+    .filter((e) => {
+      if (!matchesSearch(e.key, e.info, searchQuery)) return false;
+      if (!matchesCategory(e.cats, category)) return false;
+      if (!matchesMedia(e.info, media)) return false;
+      if (!matchesStatusFilter(statusFilter, e.stats, e.info.noAuth)) return false;
+      if (displayMode === "configured" && !isConfigured(e.stats, e.info)) return false;
+      if (modelFilterActive) {
+        e.modelMatch = findModelMatches(modelIndex, [e.info.alias, e.key].filter(Boolean), modelQuery);
+        if (e.modelMatch.count === 0) return false;
+      } else {
+        e.modelMatch = null;
+      }
+      return true;
+    })
+    .sort(byPriority);
 
-  // Web Cookie: providers authenticated by a pasted browser/session cookie
-  // (connections are stored with authType "cookie" — see POST /api/providers).
-  const webCookieEntries = Object.entries(WEB_COOKIE_PROVIDERS)
-    .filter(
-      ([key, info]) =>
-        !info.hidden &&
-        (info.serviceKinds ?? ["llm"]).includes("llm") &&
-        matchSearch(info.name) &&
-        matchStatus(getProviderStats(key, "cookie"), info.noAuth),
-    )
-    .sort(([ka, a], [kb, b]) => {
-      const ca = getProviderStats(ka, "cookie").total > 0 ? 0 : 1;
-      const cb = getProviderStats(kb, "cookie").total > 0 ? 0 : 1;
-      if (ca !== cb) return ca - cb;
-      return (a.name || "").localeCompare(b.name || "");
-    });
+  const renderCard = (e) => {
+    const onToggle = (active) => handleToggleProvider(e.key, e.authTypes, active);
+    return e.cardKind === "oauth" ? (
+      <ProviderCard key={e.key} providerId={e.key} provider={e.info} stats={e.stats} authType={e.cardAuthType} modelMatch={e.modelMatch} onToggle={onToggle} />
+    ) : (
+      <ApiKeyProviderCard key={e.key} providerId={e.key} provider={e.info} stats={e.stats} authType={e.cardAuthType} modelMatch={e.modelMatch} onToggle={onToggle} />
+    );
+  };
 
   if (loading) {
     return (
@@ -393,33 +435,34 @@ export default function ProvidersPage() {
     );
   }
 
-  const hasAnyResult =
-    oauthEntries.length > 0 ||
-    freeEntries.length > 0 ||
-    freeTierEntries.length > 0 ||
-    apikeyEntries.length > 0 ||
-    webCookieEntries.length > 0 ||
-    compatibleProviders.length > 0 ||
-    anthropicCompatibleProviders.length > 0;
+  const sections = SECTION_ORDER.map((id) => ({
+    id,
+    items: visible.filter((e) => e.section === id),
+  })).filter((s) => s.items.length > 0);
 
   return (
     <div className="flex min-w-0 flex-col gap-6 px-1 sm:px-0">
-      <div className="flex items-center justify-end">
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="h-8 rounded-lg border border-black/10 bg-black/[0.02] px-2 text-xs text-text-primary outline-none transition-colors hover:bg-black/5 dark:border-white/10 dark:bg-white/[0.03] dark:hover:bg-white/10"
-          aria-label="Filter providers by connection status"
-        >
-          {STATUS_FILTER_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      </div>
+      <ProviderSummaryCard
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        modelQuery={modelQuery}
+        onModelChange={setModelQuery}
+        mode={displayMode}
+        onModeChange={changeDisplayMode}
+        statusFilter={statusFilter}
+        onStatusChange={setStatusFilter}
+        category={category}
+        onCategoryChange={setCategory}
+        media={media}
+        onMediaChange={setMedia}
+        categoryCounts={categoryCounts}
+        onAddOpenAI={() => setShowAddCompatibleModal(true)}
+        onAddAnthropic={() => setShowAddAnthropicCompatibleModal(true)}
+        onTestAll={() => handleBatchTest("all")}
+        testing={!!testingMode}
+      />
 
-      {!hasAnyResult && (
+      {visible.length === 0 && (
         <div className="text-center py-8 border border-dashed border-border rounded-xl">
           <span className="material-symbols-outlined text-[32px] text-text-muted mb-2">
             search_off
@@ -430,224 +473,56 @@ export default function ProvidersPage() {
         </div>
       )}
 
-      {/* Custom Providers (OpenAI/Anthropic Compatible) — dynamic */}
-      <div className="flex flex-col gap-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <h2 className="text-lg sm:text-xl font-semibold flex items-center gap-2 leading-tight">
-            Custom Providers (OpenAI/Anthropic Compatible){" "}
-          </h2>
-          <div className="grid grid-cols-1 gap-2 sm:flex sm:w-auto">
-            <Button
-              size="sm"
-              icon="add"
-              onClick={() => setShowAddAnthropicCompatibleModal(true)}
-              className="w-full sm:w-auto"
-            >
-              Add Anthropic Compatible
-            </Button>
-            <Button
-              size="sm"
-              variant="secondary"
-              icon="add"
-              onClick={() => setShowAddCompatibleModal(true)}
-              className="w-full !bg-white !text-black hover:!bg-gray-100 sm:w-auto"
-            >
-              Add OpenAI Compatible
-            </Button>
-          </div>
-        </div>
-        {compatibleProviders.length === 0 &&
-        anthropicCompatibleProviders.length === 0 ? (
-          <div className="flex items-center justify-center gap-2 py-2 border border-dashed border-border rounded-xl text-text-muted text-sm">
-            <span className="material-symbols-outlined text-[18px]">extension</span>
-            <span>No custom providers — use buttons above to add OpenAI/Anthropic compatible endpoints</span>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
-            {[...compatibleProviders, ...anthropicCompatibleProviders].map(
-              (info) => (
-                <ApiKeyProviderCard
-                  key={info.id}
-                  providerId={info.id}
-                  provider={info}
-                  stats={getProviderStats(info.id, "apikey")}
-                  authType="compatible"
-                  onToggle={(active) =>
-                    handleToggleProvider(info.id, "apikey", active)
-                  }
-                />
-              ),
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* OAuth Providers */}
-      {oauthEntries.length > 0 && (
-      <div className="flex flex-col gap-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <h2 className="text-lg sm:text-xl font-semibold flex items-center gap-2 leading-tight">
-            OAuth Providers
-          </h2>
-          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
-            <ModelAvailabilityBadge />
-            <button
-              onClick={() => handleBatchTest("oauth")}
-              disabled={!!testingMode}
-              className={`flex w-full items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium transition-colors sm:w-auto sm:py-1.5 ${
-                testingMode === "oauth"
-                  ? "bg-primary/20 border-primary/40 text-primary animate-pulse"
-                  : "bg-bg border-border text-text-muted hover:text-text-main hover:border-primary/40"
-              }`}
-              title="Test all OAuth connections"
-              aria-label="Test all OAuth connections"
-            >
-              <span
-                className={`material-symbols-outlined text-[14px]${testingMode === "oauth" ? " animate-spin" : ""}`}
-              >
-                play_arrow
-              </span>
-              {testingMode === "oauth" ? "Testing..." : "Test All"}
-            </button>
-          </div>
-        </div>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
-          {oauthEntries.map(([key, info]) => {
-            const authTypes = dualAuthTypes(info, key);
-            return (
-              <ProviderCard
-                key={key}
-                providerId={key}
-                provider={info}
-                stats={getProviderStats(key, authTypes)}
-                authType="oauth"
-                onToggle={(active) => handleToggleProvider(key, authTypes, active)}
-              />
-            );
-          })}
-        </div>
-      </div>
-      )}
-
-      {/* Free Tier Providers */}
-      {(freeEntries.length > 0 || freeTierEntries.length > 0) && (
-      <div className="flex flex-col gap-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <h2 className="text-lg sm:text-xl font-semibold flex items-center gap-2 leading-tight">
-            Free Tier Providers
-          </h2>
-          <button
-            onClick={() => handleBatchTest("free")}
-            disabled={!!testingMode}
-            className={`flex w-full items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium transition-colors sm:w-auto sm:py-1.5 ${
-              testingMode === "free"
-                ? "bg-primary/20 border-primary/40 text-primary animate-pulse"
-                : "bg-bg border-border text-text-muted hover:text-text-main hover:border-primary/40"
-            }`}
-            title="Test all Free connections"
-            aria-label="Test all Free provider connections"
-          >
-            <span
-              className={`material-symbols-outlined text-[14px]${testingMode === "free" ? " animate-spin" : ""}`}
-            >
-              play_arrow
-            </span>
-            {testingMode === "free" ? "Testing..." : "Test All"}
-          </button>
-        </div>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
-          {freeEntries.map(([key, info]) => {
-            // Dual-auth (e.g. kiro): count/toggle oauth + apikey/api_key so the
-            // card total matches the provider detail page.
-            const freeAuthTypes = dualAuthTypes(info, key);
-            return (
-              <ProviderCard
-                key={key}
-                providerId={key}
-                provider={info}
-                stats={getProviderStats(key, freeAuthTypes)}
-                authType="free"
-                onToggle={(active) =>
-                  handleToggleProvider(key, freeAuthTypes, active)
-                }
-              />
-            );
-          })}
-          {freeTierEntries.map(([key, info]) => {
-            const freeAuthTypes = dualAuthTypes(info, key);
-            return (
-              <ApiKeyProviderCard
-                key={key}
-                providerId={key}
-                provider={info}
-                stats={getProviderStats(key, freeAuthTypes)}
-                authType={Array.isArray(freeAuthTypes) ? (freeAuthTypes[0] ?? "apikey") : freeAuthTypes}
-                onToggle={(active) => handleToggleProvider(key, freeAuthTypes, active)}
-              />
-            );
-          })}
-        </div>
-      </div>
-      )}
-
-      {/* API Key Providers — fixed list */}
-      {apikeyEntries.length > 0 && (
-      <div className="flex flex-col gap-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <h2 className="text-lg sm:text-xl font-semibold flex items-center gap-2 leading-tight">
-            API Key Providers{" "}
-          </h2>
-          <button
-            onClick={() => handleBatchTest("apikey")}
-            disabled={!!testingMode}
-            className={`flex w-full items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium transition-colors sm:w-auto sm:py-1.5 ${
-              testingMode === "apikey"
-                ? "bg-primary/20 border-primary/40 text-primary animate-pulse"
-                : "bg-bg border-border text-text-muted hover:text-text-main hover:border-primary/40"
-            }`}
-            title="Test all API Key connections"
-            aria-label="Test all API Key connections"
-          >
-            <span
-              className={`material-symbols-outlined text-[14px]${testingMode === "apikey" ? " animate-spin" : ""}`}
-            >
-              play_arrow
-            </span>
-            {testingMode === "apikey" ? "Testing..." : "Test All"}
-          </button>
-        </div>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
-          {visibleApikeyEntries.map(([key, info]) => (
-            <ApiKeyProviderCard
-              key={key}
-              providerId={key}
-              provider={info}
-              stats={getProviderStats(key, "apikey")}
-              authType="apikey"
-              onToggle={(active) => handleToggleProvider(key, "apikey", active)}
-            />
-          ))}
-          {webCookieEntries.map(([key, info]) => (
-            <ApiKeyProviderCard
-              key={key}
-              providerId={key}
-              provider={info}
-              stats={getProviderStats(key, "cookie")}
-              authType="cookie"
-              onToggle={(active) => handleToggleProvider(key, "cookie", active)}
-            />
-          ))}
-        </div>
-        {!isApikeySearching && !showAllApikey && hiddenApikeyCount > 0 && (
-          <button
-            onClick={() => setShowAllApikey(true)}
-            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-primary/40 px-3 py-2.5 text-sm font-medium text-primary transition-colors hover:border-primary hover:bg-primary/5"
-          >
-            <span className="material-symbols-outlined text-[16px]">expand_more</span>
-            Show all {apikeyEntries.length} providers
-          </button>
-        )}
-      </div>
+      {displayMode === "compact" ? (
+        visible.length > 0 && <div className={COMPACT_GRID}>{visible.map(renderCard)}</div>
+      ) : (
+        sections.map(({ id, items }) => {
+          // Truncate the long API key list only when nothing is being filtered.
+          const truncate = id === "apikey" && !isFiltering && !showAllApikey && items.length > APIKEY_INITIAL_VISIBLE;
+          const shown = truncate ? items.slice(0, APIKEY_INITIAL_VISIBLE) : items;
+          const testMode = { oauth: "oauth", free: "free", apikey: "apikey" }[id];
+          return (
+            <div key={id} className="flex flex-col gap-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <h2 className="text-lg sm:text-xl font-semibold flex items-center gap-2 leading-tight">
+                  {SECTION_TITLES[id]}
+                  <span className="text-xs font-normal text-text-muted">{items.length}</span>
+                </h2>
+                <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+                  {id === "oauth" && <ModelAvailabilityBadge />}
+                  {testMode && (
+                    <button
+                      onClick={() => handleBatchTest(testMode)}
+                      disabled={!!testingMode}
+                      className={`flex w-full items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium transition-colors sm:w-auto sm:py-1.5 ${
+                        testingMode === testMode
+                          ? "bg-primary/20 border-primary/40 text-primary animate-pulse"
+                          : "bg-bg border-border text-text-muted hover:text-text-main hover:border-primary/40"
+                      }`}
+                      title={`Test all ${testMode} connections`}
+                      aria-label={`Test all ${testMode} connections`}
+                    >
+                      <span className={`material-symbols-outlined text-[14px]${testingMode === testMode ? " animate-spin" : ""}`}>
+                        play_arrow
+                      </span>
+                      {testingMode === testMode ? "Testing..." : "Test All"}
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className={GRID}>{shown.map(renderCard)}</div>
+              {truncate && (
+                <button
+                  onClick={() => setShowAllApikey(true)}
+                  className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-primary/40 px-3 py-2.5 text-sm font-medium text-primary transition-colors hover:border-primary hover:bg-primary/5"
+                >
+                  <span className="material-symbols-outlined text-[16px]">expand_more</span>
+                  Show all {items.length} providers
+                </button>
+              )}
+            </div>
+          );
+        })
       )}
 
       <AddCompatibleModal
@@ -700,7 +575,16 @@ export default function ProvidersPage() {
   );
 }
 
-function ProviderCard({ providerId, provider, stats, authType, onToggle }) {
+function ModelMatchLine({ modelMatch }) {
+  if (!modelMatch?.count) return null;
+  return (
+    <div className="truncate text-[11px] text-primary" title={modelMatch.samples.join(", ")}>
+      {modelMatch.count} model{modelMatch.count > 1 ? "s" : ""}: {modelMatch.samples.join(", ")}
+    </div>
+  );
+}
+
+function ProviderCard({ providerId, provider, stats, authType, onToggle, modelMatch }) {
   const { connected, error, errorCode, errorTime, allDisabled } = stats;
   const isNoAuth = !!provider.noAuth;
 
@@ -765,6 +649,7 @@ function ProviderCard({ providerId, provider, stats, authType, onToggle }) {
                   </>
                 )}
               </div>
+              <ModelMatchLine modelMatch={modelMatch} />
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
@@ -808,6 +693,7 @@ ProviderCard.propTypes = {
   }).isRequired,
   authType: PropTypes.string,
   onToggle: PropTypes.func,
+  modelMatch: PropTypes.object,
 };
 
 function ApiKeyProviderCard({
@@ -816,6 +702,7 @@ function ApiKeyProviderCard({
   stats,
   authType,
   onToggle,
+  modelMatch,
 }) {
   const { connected, error, errorCode, errorTime, allDisabled } = stats;
   const isCompatible = providerId.startsWith(OPENAI_COMPATIBLE_PREFIX);
@@ -903,6 +790,7 @@ function ApiKeyProviderCard({
                   </>
                 )}
               </div>
+              <ModelMatchLine modelMatch={modelMatch} />
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
@@ -947,6 +835,7 @@ ApiKeyProviderCard.propTypes = {
   }).isRequired,
   authType: PropTypes.string,
   onToggle: PropTypes.func,
+  modelMatch: PropTypes.object,
 };
 
 function ProviderTestResultsView({ results }) {

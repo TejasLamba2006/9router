@@ -1,0 +1,117 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1792349658072,
+  "projectRoot": "C:\\Users\\Tejas\\9router-sync\\tests",
+  "techStack": {
+    "languages": [
+      {
+        "name": "JavaScript/TypeScript",
+        "version": ">=18",
+        "confidence": "high",
+        "markers": [
+          "package.json"
+        ]
+      }
+    ],
+    "frameworks": [
+      {
+        "name": "vitest",
+        "version": "4.0.0",
+        "category": "testing"
+      }
+    ],
+    "packageManager": "npm",
+    "runtime": "Node.js 18"
+  },
+  "build": {
+    "buildCommand": null,
+    "testCommand": "npm test",
+    "lintCommand": null,
+    "devCommand": null,
+    "scripts": {
+      "test": "vitest run --reporter=verbose",
+      "test:watch": "vitest --reporter=verbose"
+    }
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [],
+    "gitBranches": {
+      "defaultBranch": "master",
+      "branchingStrategy": null
+    }
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "auth": {
+      "path": "auth",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1792349658041,
+      "keyFiles": [
+        "saml.test.js"
+      ]
+    },
+    "translator": {
+      "path": "translator",
+      "purpose": null,
+      "fileCount": 23,
+      "lastAccessed": 1792349658047,
+      "keyFiles": [
+        "agent-client-fixes.test.js",
+        "AGENTS.md",
+        "bugs-3905-deepseek-tool-type.test.js",
+        "bugs-antigravity.test.js",
+        "bugs-claudeCode-context.test.js"
+      ]
+    },
+    "unit": {
+      "path": "unit",
+      "purpose": null,
+      "fileCount": 404,
+      "lastAccessed": 1792349658048,
+      "keyFiles": [
+        "account-fallback-4xx.test.js",
+        "aggregator-providers-batch.test.js",
+        "agnes-model-seeds.test.js",
+        "alibaba-token-plan-provider.test.js",
+        "alicode-cache-control-2069.test.js"
+      ]
+    },
+    "__baseline__": {
+      "path": "__baseline__",
+      "purpose": null,
+      "fileCount": 11,
+      "lastAccessed": 1792349658049,
+      "keyFiles": [
+        "alias-baseline.json",
+        "baseline-results.json",
+        "current.json",
+        "known-fails.txt",
+        "oauth-urls-baseline.json"
+      ]
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "unit/antigravity-thought-signature-family.test.js",
+      "accessCount": 3,
+      "lastAccessed": 1792349729940,
+      "type": "file"
+    },
+    {
+      "path": "unit/model-catalog-pricing.test.js",
+      "accessCount": 1,
+      "lastAccessed": 1792356192823,
+      "type": "file"
+    }
+  ],
+  "userDirectives": []
+}

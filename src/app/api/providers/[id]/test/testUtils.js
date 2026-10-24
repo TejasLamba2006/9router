@@ -519,6 +519,56 @@ async function fetchWithConnectionProxy(url, options = {}, effectiveProxy = null
   });
 }
 
+// Generic config-driven API-key probe for registry providers without a bespoke test case.
+// Auth is only rejected on 401/403; other statuses (400/404/429/...) still prove the key reached the API.
+async function testRegistryApiKey(connection, effectiveProxy) {
+  const cfg = PROVIDERS[connection.provider];
+  if (!cfg) return { valid: false, error: "Provider test not supported" };
+  const key = connection.apiKey;
+  const isClaude = cfg.format === "claude";
+  const authHeaders = isClaude
+    ? { "x-api-key": key, "anthropic-version": "2023-06-01", Authorization: `Bearer ${key}` }
+    : cfg.auth?.header && cfg.auth.header.toLowerCase() !== "authorization"
+      ? { [cfg.auth.header]: key }
+      : { Authorization: `Bearer ${key}` };
+  const verdict = (res) => {
+    const valid = res.status !== 401 && res.status !== 403;
+    return { valid, error: valid ? null : "Invalid API key" };
+  };
+  const probe = async (url, extra = {}) => fetchWithConnectionProxy(url, {
+    ...extra,
+    headers: { ...authHeaders, ...(cfg.headers || {}), ...(extra.headers || {}) },
+  }, effectiveProxy);
+
+  const modelsUrl = cfg.validateUrl || AI_PROVIDERS[connection.provider]?.modelsFetcher?.url;
+  const baseUrl = (cfg.baseUrl || "").replace(/\?.*$/, "");
+  const model = connection.defaultModel || getDefaultModel(connection.provider);
+  const postChat = (url, body) => probe(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (modelsUrl) {
+    const res = await probe(modelsUrl);
+    if (res.ok) return { valid: true, error: null };
+    if (res.status !== 404 && res.status !== 405) return verdict(res);
+    // fall through to a 1-token completion when /models is not implemented
+  }
+  if (baseUrl.endsWith("/chat/completions")) {
+    if (!modelsUrl) {
+      const res = await probe(`${baseUrl.replace(/\/chat\/completions$/, "")}/models`);
+      if (res.ok) return { valid: true, error: null };
+      if (res.status !== 404 && res.status !== 405) return verdict(res);
+    }
+    return verdict(await postChat(baseUrl, { model, max_tokens: 1, messages: [{ role: "user", content: "hi" }] }));
+  }
+  if (baseUrl.endsWith("/messages")) {
+    return verdict(await postChat(baseUrl, { model: model || "claude-3-haiku-20240307", max_tokens: 1, messages: [{ role: "user", content: "hi" }] }));
+  }
+  return { valid: false, error: "Provider test not supported" };
+}
+
 async function testApiKeyConnection(connection, effectiveProxy = null) {
   if (isOpenAICompatibleProvider(connection.provider)) {
     const modelsBase = connection.providerSpecificData?.baseUrl;
@@ -960,7 +1010,7 @@ case "llm7": {
         return { valid: res.ok, error: res.ok ? null : "Invalid API key", refreshed: false };
       }
       default:
-        return { valid: false, error: "Provider test not supported" };
+        return await testRegistryApiKey(connection, effectiveProxy);
     }
   } catch (err) {
     return { valid: false, error: err.message };
