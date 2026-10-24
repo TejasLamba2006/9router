@@ -1,5 +1,5 @@
 {
-  "name": "busbar",
+  "name": "busbar-ai",
   "version": "1.0.0",
   "description": "Fast, zero-bloat local LLM gateway and multiplexer for 290+ providers",
   "author": "TejasLamba2006",
@@ -9,6 +9,7 @@
   },
   "bin": {
     "busbar": "./cli.js",
+    "busbar-ai": "./cli.js",
     "9router": "./cli.js"
   },
   "files": [
