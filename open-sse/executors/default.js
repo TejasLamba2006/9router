@@ -233,9 +233,9 @@ export class DefaultExecutor extends BaseExecutor {
     return { ...body, tags: [...new Set(tags)] };
   }
 
-  // Fallback json_schema → json_object for openai-compatible providers without native Structured Output.
+  // Fallback json_schema → json_object for openai-compatible and native deepseek providers without native Structured Output.
   applyJsonSchemaFallback(body) {
-    if (!this.provider?.startsWith?.("openai-compatible-")) return body;
+    if (!this.provider?.startsWith?.("openai-compatible-") && this.provider !== "deepseek") return body;
     const rf = body?.response_format;
     if (rf?.type !== "json_schema" || !rf.json_schema?.schema) return body;
 

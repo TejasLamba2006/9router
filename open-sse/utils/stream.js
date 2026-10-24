@@ -453,8 +453,14 @@ export function createSSEStream(options = {}) {
               // not something to merge with the provider's own usage.
               estimatedUsage = estimated;
             } else if (state.finishReason && isFinishChunk && state.usage) {
-              // Add buffer and filter usage for client (but keep original in state.usage for logging)
-              const buffered = addBufferToUsage(state.usage);
+              // Add buffer and filter usage for client (but keep original in state.usage for logging).
+              // If the translator already built a richer usage object (e.g. claude-to-openai
+              // attaches prompt_tokens_details.cached_tokens), preserve its nested details.
+              const buffered = addBufferToUsage({
+                ...state.usage,
+                ...(item.usage?.prompt_tokens_details ? { prompt_tokens_details: item.usage.prompt_tokens_details } : {}),
+                ...(item.usage?.completion_tokens_details ? { completion_tokens_details: item.usage.completion_tokens_details } : {}),
+              });
               item.usage = filterUsageForFormat(buffered, sourceFormat);
             }
 

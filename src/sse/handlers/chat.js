@@ -1,3 +1,4 @@
+import zlib from "node:zlib";
 import "open-sse/index.js";
 
 import {
@@ -41,7 +42,16 @@ import { resolveSmartChoice } from "../services/systemoneRouter.js";
 export async function handleChat(request, clientRawRequest = null) {
   let body;
   try {
-    body = await request.json();
+    const encoding = (request.headers.get("content-encoding") || "").toLowerCase().trim();
+    if (encoding === "zstd" && typeof zlib.zstdDecompressSync === "function") {
+      const compressed = Buffer.from(await request.arrayBuffer());
+      body = JSON.parse(zlib.zstdDecompressSync(compressed).toString("utf8"));
+    } else if (encoding === "gzip") {
+      const compressed = Buffer.from(await request.arrayBuffer());
+      body = JSON.parse(zlib.gunzipSync(compressed).toString("utf8"));
+    } else {
+      body = await request.json();
+    }
   } catch {
     log.warn("CHAT", "Invalid JSON body");
     return errorResponse(HTTP_STATUS.BAD_REQUEST, "Invalid JSON body");

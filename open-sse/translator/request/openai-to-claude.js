@@ -197,6 +197,46 @@ Respond ONLY with the JSON object, no other text.`);
   return result;
 }
 
+// Convert an OpenAI multimodal content array (or string) into Claude content blocks
+function convertOpenAIMultimodalParts(parts) {
+  if (typeof parts === "string") return parts;
+  if (!Array.isArray(parts)) return parts;
+  const converted = [];
+  for (const part of parts) {
+    if (!part || typeof part !== "object") continue;
+    if (part.type === OPENAI_BLOCK.TEXT && part.text) {
+      converted.push({ type: CLAUDE_BLOCK.TEXT, text: part.text });
+    } else if (part.type === OPENAI_BLOCK.IMAGE_URL && part.image_url?.url) {
+      const url = part.image_url.url;
+      const parsed = parseDataUri(url);
+      if (parsed) {
+        converted.push({
+          type: CLAUDE_BLOCK.IMAGE,
+          source: { type: "base64", media_type: parsed.mimeType, data: parsed.base64 }
+        });
+      } else if (url.startsWith("http://") || url.startsWith("https://")) {
+        converted.push({
+          type: CLAUDE_BLOCK.IMAGE,
+          source: { type: "url", url }
+        });
+      }
+    } else if (part.type === OPENAI_BLOCK.IMAGE && part.source) {
+      converted.push({ type: CLAUDE_BLOCK.IMAGE, source: part.source });
+    } else if (part.type === OPENAI_BLOCK.FILE && part.file?.file_data) {
+      const parsed = parseDataUri(part.file.file_data);
+      if (parsed && parsed.mimeType === "application/pdf") {
+        converted.push({
+          type: CLAUDE_BLOCK.DOCUMENT,
+          source: { type: "base64", media_type: parsed.mimeType, data: parsed.base64 }
+        });
+      }
+    } else {
+      converted.push(part);
+    }
+  }
+  return converted;
+}
+
 // Get content blocks from single message
 function getContentBlocksFromMessage(msg, toolNameMap = new Map()) {
   const blocks = [];
@@ -205,7 +245,7 @@ function getContentBlocksFromMessage(msg, toolNameMap = new Map()) {
     blocks.push({
       type: CLAUDE_BLOCK.TOOL_RESULT,
       tool_use_id: msg.tool_call_id,
-      content: msg.content
+      content: convertOpenAIMultimodalParts(msg.content)
     });
   } else if (msg.role === ROLE.USER) {
     if (typeof msg.content === "string") {
@@ -220,7 +260,7 @@ function getContentBlocksFromMessage(msg, toolNameMap = new Map()) {
           blocks.push({
             type: CLAUDE_BLOCK.TOOL_RESULT,
             tool_use_id: part.tool_use_id,
-            content: part.content,
+            content: convertOpenAIMultimodalParts(part.content),
             ...(part.is_error && { is_error: part.is_error })
           });
         } else if (part.type === OPENAI_BLOCK.IMAGE_URL) {

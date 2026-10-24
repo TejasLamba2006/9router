@@ -351,7 +351,10 @@ function applyFormat(fmt, body, cfg, caps, supportedLevels, display) {
     }
     case "deepseek": {
       if (none && canDisable) { body.thinking = { type: "disabled" }; break; }
-      body.thinking = { type: "enabled" };
+      const budget = cfg.mode === "budget" ? toBudget(eff, caps.thinkingRange) : undefined;
+      body.thinking = Number.isFinite(budget) && budget > 0
+        ? { type: "enabled", budget_tokens: budget }
+        : { type: "enabled" };
       // DeepSeek's own API collapses low/medium→high and xhigh/max→max, so the wire
       // stays on {high,max} for it. The declared levels win where they disagree:
       // zen's free deepseek-v4.1-flash publishes low|high|max and its upstream takes

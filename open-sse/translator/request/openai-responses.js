@@ -139,11 +139,28 @@ export function openaiResponsesToOpenAIRequest(model, body, stream, credentials)
         }
         pendingToolResults = [];
       }
-      // Add tool result immediately
+      // Add tool result immediately (convert input_image / input_text array items when present)
+      let toolContent;
+      if (typeof item.output === "string") {
+        toolContent = item.output;
+      } else if (Array.isArray(item.output)) {
+        toolContent = item.output.map(c => {
+          if (c?.type === RESPONSES_ITEM.INPUT_TEXT || c?.type === RESPONSES_ITEM.OUTPUT_TEXT) {
+            return { type: OPENAI_BLOCK.TEXT, text: c.text };
+          }
+          if (c?.type === RESPONSES_ITEM.INPUT_IMAGE) {
+            const url = c.image_url || c.file_id || "";
+            return { type: OPENAI_BLOCK.IMAGE_URL, image_url: { url, detail: c.detail || "auto" } };
+          }
+          return c;
+        });
+      } else {
+        toolContent = JSON.stringify(item.output);
+      }
       result.messages.push({
         role: ROLE.TOOL,
         tool_call_id: item.call_id,
-        content: typeof item.output === "string" ? item.output : JSON.stringify(item.output)
+        content: toolContent
       });
     }
     else if (itemType === RESPONSES_ITEM.ADDITIONAL_TOOLS) {

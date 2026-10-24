@@ -106,8 +106,9 @@ function convertToolCalls(toolCalls) {
  * Convert Ollama non-streaming response body to OpenAI chat.completion format
  */
 export function ollamaBodyToOpenAI(body) {
+  if (Array.isArray(body?.choices)) return body;
   const msg = body.message || {};
-  const content = msg.content || "";
+  const content = msg.content ?? body.response ?? "";
   const thinking = msg.thinking || "";
   const toolCalls = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
 
