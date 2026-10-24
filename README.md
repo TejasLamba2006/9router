@@ -111,6 +111,10 @@ Set `INITIAL_PASSWORD`, `JWT_SECRET`, and `API_KEY_SECRET` in `.env` before expo
 - [Routing engine conventions](open-sse/AGENTS.md)
 - [Changelog](CHANGELOG.md)
 
+## Author and support
+
+Made by [Tejas Lamba](https://tejas.is-a.dev/) ([GitHub](https://github.com/TejasLamba2006)). Support the project via [PayPal](https://www.paypal.com/paypalme/tejaslamba) or [GitHub Sponsors](https://github.com/sponsors/TejasLamba2006).
+
 ## License
 
 MIT

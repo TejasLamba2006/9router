@@ -50,7 +50,7 @@ function collectAppPids() {
       lines.forEach(line => {
         const lower = line.toLowerCase();
         // Match anything running from 9router install dir or wrapper cli.js
-        const isAppProcess = lower.includes("9router") ||
+        const isAppProcess = lower.includes("9router") || lower.includes("busbar") || lower.includes("busbar") ||
           lower.includes("next-server") ||
           lower.includes("\\bin\\app\\") ||
           lower.includes("/bin/app/") ||
@@ -77,7 +77,7 @@ function collectAppPids() {
     try {
       const output = execSync("ps aux 2>/dev/null", { encoding: "utf8", timeout: KILL_TIMEOUT_MS });
       output.split("\n").forEach(line => {
-        const isAppProcess = line.includes("9router") ||
+        const isAppProcess = line.includes("9router") || line.includes("busbar") || line.includes("busbar") ||
           line.includes("next-server") ||
           line.includes("cloudflared") ||
           line.includes("/bin/app/") ||
@@ -159,7 +159,7 @@ export async function killAppProcesses() {
 // Resolve npx/9router binary to relaunch after update (cross-platform)
 function resolveRelaunchCommand() {
   const isWin = process.platform === "win32";
-  // Prefer `npx 9router` — works regardless of global bin path changes after npm i -g
+  // Prefer `npx busbar-ai` — works regardless of global bin path changes after npm i -g
   const npx = isWin ? "npx.cmd" : "npx";
   return { cmd: npx, args: [UPDATER_CONFIG.npmPackageName] };
 }

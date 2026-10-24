@@ -7,7 +7,7 @@
 
   In electrical engineering, a busbar is the solid copper strip that collects power from multiple sources and feeds every circuit on one common rail. Busbar does the same for 291 LLM providers on `localhost:20128/v1`.
 
-  [![npm](https://img.shields.io/npm/v/busbar.svg)](https://www.npmjs.com/package/busbar)
+  [![npm](https://img.shields.io/npm/v/busbar-ai.svg)](https://www.npmjs.com/package/busbar-ai)
   [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 </div>
 
@@ -54,14 +54,14 @@ Busbar keeps 9Router's footprint and ports the useful parts of OmniRoute without
 Global install:
 
 ```bash
-npm install -g busbar
+npm install -g busbar-ai
 busbar
 ```
 
 Or run with `npx`:
 
 ```bash
-npx busbar
+npx busbar-ai
 ```
 
 The dashboard opens at `http://localhost:20128/dashboard`. The API is served at `http://localhost:20128/v1`.
@@ -110,6 +110,10 @@ Set `INITIAL_PASSWORD`, `JWT_SECRET`, and `API_KEY_SECRET` in `.env` before expo
 - [Architecture](docs/ARCHITECTURE.md)
 - [Routing engine conventions](open-sse/AGENTS.md)
 - [Changelog](CHANGELOG.md)
+
+## Author and support
+
+Made by [Tejas Lamba](https://tejas.is-a.dev/) ([GitHub](https://github.com/TejasLamba2006)). Support the project via [PayPal](https://www.paypal.com/paypalme/tejaslamba) or [GitHub Sponsors](https://github.com/sponsors/TejasLamba2006).
 
 ## License
 
